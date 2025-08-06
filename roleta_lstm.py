@@ -5,21 +5,23 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 import plotly.express as px
 
-# Inicializar variáveis de sessão
+# ================================
+# ESTADO INICIAL
+# ================================
 if "historico" not in st.session_state:
     st.session_state.historico = []
-
 if "modelo" not in st.session_state:
     st.session_state.modelo = None
-
 if "input_numero" not in st.session_state:
     st.session_state.input_numero = ""
 
-# Função para treinar o modelo
+# ================================
+# FUNÇÕES
+# ================================
 def treinar_modelo():
     if len(st.session_state.historico) < 10:
-        return  # Treina só com pelo menos 10 números
-    dados = np.array(st.session_state.historico[-20:])  # pegar últimos 20 números
+        return
+    dados = np.array(st.session_state.historico[-20:])
     dados = dados.reshape((1, len(dados), 1))
     labels = dados[:, 1:, :]
     dados = dados[:, :-1, :]
@@ -28,148 +30,125 @@ def treinar_modelo():
     modelo.add(LSTM(50, activation='relu', input_shape=(dados.shape[1], dados.shape[2])))
     modelo.add(Dense(1))
     modelo.compile(optimizer='adam', loss='mse')
-
     modelo.fit(dados, labels, epochs=100, verbose=0)
     st.session_state.modelo = modelo
 
-# Função para prever próximo número
 def prever_proximo():
     if st.session_state.modelo is None or len(st.session_state.historico) < 10:
         return None
     entrada = np.array(st.session_state.historico[-19:]).reshape((1, 19, 1))
     pred = st.session_state.modelo.predict(entrada, verbose=0)
-    pred_num = int(np.round(pred[0, 0]))
-    if pred_num < 0:
-        pred_num = 0
-    if pred_num > 36:
-        pred_num = 36
-    return pred_num
+    return int(np.clip(np.round(pred[0, 0]), 0, 36))
 
-# Função para processar submissão
 def adicionar_numero():
     try:
         numero = int(st.session_state.input_numero)
         if 0 <= numero <= 36:
             st.session_state.historico.append(numero)
             treinar_modelo()
-            st.session_state.input_numero = ""  # limpa o campo
+            # Limpa input de forma segura usando st.text_input com key diferente
+            st.session_state.input_numero = "" 
         else:
-            st.error("Número inválido! Insira um número entre 0 e 36.")
+            st.error("Número inválido! Insira entre 0 e 36.")
     except ValueError:
         st.error("Por favor, insira um número válido.")
 
-# Layout moderno com CSS customizado
+# ================================
+# ESTILO PERSONALIZADO
+# ================================
 st.markdown(
     """
     <style>
-    /* Fundo degradê suave */
     .stApp {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: #e0e0e0;
+        background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
         font-family: 'Roboto', sans-serif;
+        color: #f2f2f2;
     }
-    /* Título centralizado e estilizado */
     .titulo {
-        font-size: 3.5rem;
+        font-size: 3rem;
         font-weight: 900;
         text-align: center;
         margin-bottom: 2rem;
         color: #fff;
-        letter-spacing: 0.1em;
-        text-shadow: 2px 2px 8px rgba(0,0,0,0.5);
+        text-shadow: 2px 2px 6px rgba(0,0,0,0.7);
     }
-    /* Container do input */
-    .input-container {
-        max-width: 320px;
-        margin: 0 auto 2rem auto;
-    }
-    /* Campo de texto com bordas arredondadas e padding */
-    div.stTextInput > label > div > input {
+    /* Input estilizado */
+    div[data-testid="stTextInput"] input {
         border-radius: 12px;
-        padding: 0.8rem 1rem;
+        border: none;
+        background: rgba(255, 255, 255, 0.2);
+        color: #fff;
         font-size: 1.2rem;
-        border: none;
+        padding: 10px;
+        text-align: center;
+    }
+    div[data-testid="stTextInput"] input:focus {
+        background: rgba(255, 255, 255, 0.3);
         outline: none;
-        box-shadow: 0 0 8px #fff5;
-        background-color: #fff2;
-        color: #333;
-        transition: box-shadow 0.3s ease;
     }
-    div.stTextInput > label > div > input:focus {
-        box-shadow: 0 0 14px #fff;
-    }
-    /* Botão estilizado */
+    /* Botão */
     div.stButton > button {
-        background-color: #ff6f61;
+        background: linear-gradient(90deg, #ff512f, #dd2476);
         color: white;
-        font-weight: 700;
-        padding: 0.75rem 1.5rem;
-        border-radius: 12px;
+        font-weight: bold;
+        padding: 0.7rem 1.2rem;
         border: none;
-        cursor: pointer;
-        font-size: 1.1rem;
-        transition: background-color 0.3s ease;
-        margin-top: 0.5rem;
+        border-radius: 10px;
         width: 100%;
+        transition: transform 0.2s ease-in-out;
     }
     div.stButton > button:hover {
-        background-color: #ff4a39;
+        transform: scale(1.05);
     }
-    /* Container histórico */
-    .historico-container {
-        max-width: 600px;
-        margin: 0 auto;
-        background-color: #ffffff22;
-        padding: 1.5rem 2rem;
-        border-radius: 20px;
-        box-shadow: 0 0 15px #fff3;
+    /* Histórico em cards */
+    .historico-card {
+        display: inline-block;
+        background: rgba(255,255,255,0.1);
+        margin: 5px;
+        padding: 10px 15px;
+        border-radius: 10px;
+        font-weight: bold;
+        color: #fff;
         font-size: 1.2rem;
-        color: #ddd;
+        box-shadow: 0 0 8px rgba(0,0,0,0.4);
     }
-    /* Texto da previsão */
     .previsao {
         text-align: center;
-        font-size: 1.6rem;
+        font-size: 1.8rem;
         margin-top: 2rem;
-        font-weight: 700;
-        color: #ffe;
-        text-shadow: 1px 1px 6px #0008;
+        font-weight: bold;
+        color: #ffdf5d;
+        text-shadow: 1px 1px 6px #000;
     }
     </style>
     """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
 
-st.markdown('<div class="titulo">Roleta Preditiva</div>', unsafe_allow_html=True)
+# ================================
+# INTERFACE
+# ================================
+st.markdown('<div class="titulo">🎯 Roleta Preditiva</div>', unsafe_allow_html=True)
 
-with st.form(key="input_form"):
-    with st.container():
-        st.markdown('<div class="input-container">', unsafe_allow_html=True)
-        numero_input = st.text_input(
-            "Digite o número sorteado (0-36):",
-            key="input_numero",
-            max_chars=2,
-            placeholder="Exemplo: 17",
-            label_visibility="visible",
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-    submit_btn = st.form_submit_button("Registrar")
+with st.form(key="input_form", clear_on_submit=True):
+    numero_input = st.text_input(
+        "Digite o número sorteado (0-36):",
+        key="input_numero",
+        max_chars=2,
+        placeholder="Ex: 17",
+    )
+    submit_btn = st.form_submit_button("Registrar", on_click=adicionar_numero)
 
-if submit_btn:
-    adicionar_numero()
-
-# Mostrar histórico
-st.markdown('<div class="historico-container">', unsafe_allow_html=True)
-st.subheader("Histórico dos números inseridos")
+# Histórico
+st.subheader("📜 Histórico de números")
 if len(st.session_state.historico) == 0:
-    st.write("Nenhum número inserido ainda.")
+    st.info("Nenhum número inserido ainda.")
 else:
-    st.write(st.session_state.historico)
-st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("".join([f"<span class='historico-card'>{n}</span>" for n in st.session_state.historico]), unsafe_allow_html=True)
 
-# Mostrar previsão
+# Previsão
 proximo = prever_proximo()
 if proximo is not None:
-    st.markdown(f'<div class="previsao">Próximo número previsto pela IA: <strong>{proximo}</strong></div>', unsafe_allow_html=True)
+    st.markdown(f"<div class='previsao'>🔮 Próximo número previsto: <strong>{proximo}</strong></div>", unsafe_allow_html=True)
 else:
-    st.info("Insira pelo menos 10 números para começar a prever.")
+    st.info("Insira pelo menos 10 números para ativar a previsão.")
