@@ -74,7 +74,7 @@ def treinar_modelo():
     modelo.add(LSTM(50, activation='relu', input_shape=(19, 1)))
     modelo.add(Dense(1))
     modelo.compile(optimizer='adam', loss='mse')
-    modelo.fit(X, y, epochs=20, verbose=0)  # 🔥 Menos épocas = mais rápido
+    modelo.fit(X, y, epochs=20, verbose=0)
     return modelo
 
 # ==============================
@@ -83,50 +83,56 @@ def treinar_modelo():
 def prever_proximo():
     if st.session_state.modelo is None or len(st.session_state.historico) < 10:
         return None
-
     janela = min(19, len(st.session_state.historico))
     entrada = np.array(st.session_state.historico[-janela:]).reshape((1, janela, 1))
-
     if janela < 19:
         zeros_pad = np.zeros((1, 19 - janela, 1))
         entrada = np.concatenate([zeros_pad, entrada], axis=1)
-
     pred = st.session_state.modelo.predict(entrada, verbose=0)
     return int(np.clip(np.round(pred[0, 0]), 0, 36))
 
 # ==============================
-# ➕ Adicionar Número (Rápido)
+# ➕ Inserir Números
 # ==============================
-def adicionar_numero():
+def inserir_numero_unico():
     numero_str = st.session_state.input_numero.strip()
     if numero_str.isdigit():
         numero = int(numero_str)
         if 0 <= numero <= 36:
             st.session_state.historico.append(numero)
             st.session_state.contador_treinamento += 1
-
-            # Só treina a cada 5 inserções (reduz lag)
             if len(st.session_state.historico) >= 20 and st.session_state.contador_treinamento >= 5:
                 st.session_state.modelo = treinar_modelo()
                 st.session_state.contador_treinamento = 0
+    st.session_state.input_numero = ""  # limpa sem refresh
 
-    st.session_state.input_numero = ""  # Limpa instantaneamente
+def inserir_varios_numeros():
+    numeros_str = st.session_state.input_varios.strip()
+    numeros = [n.strip() for n in numeros_str.replace(";", ",").split(",") if n.strip().isdigit()]
+    for n in numeros:
+        numero = int(n)
+        if 0 <= numero <= 36:
+            st.session_state.historico.append(numero)
+    if len(st.session_state.historico) >= 20:
+        st.session_state.modelo = treinar_modelo()
+    st.session_state.input_varios = ""  # limpa campo
 
 # ==============================
 # 🖥️ Interface
 # ==============================
 st.title("🎰 Roleta Preditiva Inteligente")
-st.markdown("Insira os números e veja as previsões!")
-
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("➕ Inserir Número")
-    st.text_input("Digite o número (0 a 36):", key="input_numero", on_change=adicionar_numero)
+    st.subheader("➕ Inserir Número Rápido")
+    st.text_input("Digite um número (0 a 36):", key="input_numero", on_change=inserir_numero_unico)
+    st.subheader("📥 Inserir Vários Números")
+    st.text_area("Cole aqui (ex: 12, 5, 8, 19, 0, 32):", key="input_varios")
+    st.button("Adicionar em Lote", on_click=inserir_varios_numeros)
 
     if st.session_state.historico:
-        st.subheader("📜 Histórico (Últimos 20)")
-        st.write(", ".join(map(str, st.session_state.historico[-20:])))
+        st.subheader("📜 Histórico (Últimos 30)")
+        st.write(", ".join(map(str, st.session_state.historico[-30:])))
 
 with col2:
     st.subheader("🔮 Previsão")
