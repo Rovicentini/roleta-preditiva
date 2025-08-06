@@ -9,8 +9,8 @@ st.set_page_config(page_title="Roleta Preditiva", page_icon="🎰", layout="wide
 # 🌌 Estilo Lovable Futurista
 # ==============================
 st.markdown("""
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap');
     * { font-family: 'Space Grotesk', sans-serif; }
 
     /* Fundo animado */
@@ -90,9 +90,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================
-# Funções (mesmas anteriores)
+# Estado e Funções
 # ==============================
-
 if "historico" not in st.session_state: st.session_state.historico = []
 if "modelo" not in st.session_state: st.session_state.modelo = None
 if "contador_treinamento" not in st.session_state: st.session_state.contador_treinamento = 0
@@ -102,7 +101,6 @@ def cor_roleta(num):
     pretos = {2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35}
     return "verde" if num==0 else "vermelho" if num in vermelhos else "preto"
 
-# 🧠 Modelo e previsão (mesmo do código anterior)
 def treinar_modelo():
     dados = np.array(st.session_state.historico)
     X, y = [], []
@@ -140,7 +138,7 @@ def inserir_numero():
     st.session_state.input = ""
 
 # ==============================
-# UI - Lovable Style
+# UI Principal
 # ==============================
 st.markdown("<h1 style='text-align:center;'>🎰 Roleta Preditiva Inteligente</h1>", unsafe_allow_html=True)
 
