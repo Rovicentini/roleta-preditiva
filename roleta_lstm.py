@@ -5,7 +5,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 
 # =============================
-# CONFIGURAÇÃO DE ESTILO MODERNO
+# CONFIGURAÇÃO DE ESTILO MODERNO (layout aprovado)
 # =============================
 st.set_page_config(page_title="Roleta Preditiva", layout="wide")
 
@@ -51,7 +51,8 @@ st.markdown("""
         .history {
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
+            gap: 6px;
+            margin-top: 10px;
         }
         .ball {
             width: 45px;
@@ -77,7 +78,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =============================
-# FUNÇÕES PRINCIPAIS
+# FUNÇÕES
 # =============================
 
 def criar_modelo():
@@ -92,12 +93,11 @@ def prever_proximo():
     if len(st.session_state.historico) < 19:
         return None, [], "Aguardando mais dados"
     
-    # Prepara dados
     entrada = np.array(st.session_state.historico[-19:]).reshape((1, 19, 1))
     pred = st.session_state.modelo.predict(entrada, verbose=0)
     numero_previsto = int(np.round(pred[0][0])) % 37
 
-    # Ajuste com padrões históricos
+    # Ajuste por padrões históricos
     frequencia = {n: st.session_state.historico.count(n) for n in set(st.session_state.historico)}
     if numero_previsto in frequencia and frequencia[numero_previsto] > 3:
         numero_previsto = (numero_previsto + 5) % 37
@@ -108,8 +108,6 @@ def prever_proximo():
     vizinhos = 1 if dispersao > 7 else 2 if dispersao > 4 else 3
 
     numeros_vizinhos = [(numero_previsto + i) % 37 for i in range(-vizinhos, vizinhos+1)]
-
-    # Definir confiança
     confianca = "ALTA" if vizinhos == 1 else "MÉDIA" if vizinhos == 2 else "BAIXA"
 
     return numero_previsto, numeros_vizinhos, confianca
@@ -136,35 +134,37 @@ st.markdown("<div class='title'>🎰 Roleta Preditiva Inteligente</div>", unsafe
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    with st.container():
-        st.markdown("<div class='block'>", unsafe_allow_html=True)
-        st.subheader("🎯 Inserir Números")
-        numero = st.number_input("Informe o número (0 a 36):", min_value=0, max_value=36, step=1, key="input_numero")
-        if st.button("Adicionar Número"):
-            st.session_state.historico.insert(0, int(numero))  # Último número à esquerda
-            if len(st.session_state.historico) > 200:
-                st.session_state.historico = st.session_state.historico[:200]
-            st.session_state.input_numero = 0
-        st.text_area("Inserir números em massa (separados por vírgula):", key="massa")
-        if st.button("Adicionar em Massa"):
-            nums = [int(x.strip()) for x in st.session_state.massa.split(",") if x.strip().isdigit()]
-            for n in nums[::-1]:  # Mantém ordem correta
-                st.session_state.historico.insert(0, n)
-            if len(st.session_state.historico) > 200:
-                st.session_state.historico = st.session_state.historico[:200]
-        st.markdown("</div>", unsafe_allow_html=True)
+    # Bloco: Inserção de Números
+    st.markdown("<div class='block'>", unsafe_allow_html=True)
+    st.subheader("🎯 Inserir Números")
+    numero = st.number_input("Informe o número (0 a 36):", min_value=0, max_value=36, step=1, key="input_numero")
+    if st.button("Adicionar Número"):
+        st.session_state.historico.insert(0, int(numero))  # Último número à esquerda
+        if len(st.session_state.historico) > 200:
+            st.session_state.historico = st.session_state.historico[:200]
+        st.session_state.input_numero = 0
 
-    with st.container():
-        st.markdown("<div class='block'>", unsafe_allow_html=True)
-        st.subheader("📜 Histórico")
-        st.markdown("<div class='history'>", unsafe_allow_html=True)
-        for n in st.session_state.historico:
-            cor = cor_numero(n)
-            st.markdown(f"<div class='ball ball-{cor}'>{n}</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.text_area("Inserir números em massa (separados por vírgula):", key="massa")
+    if st.button("Adicionar em Massa"):
+        nums = [int(x.strip()) for x in st.session_state.massa.split(",") if x.strip().isdigit()]
+        for n in nums[::-1]:
+            st.session_state.historico.insert(0, n)
+        if len(st.session_state.historico) > 200:
+            st.session_state.historico = st.session_state.historico[:200]
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Bloco: Histórico
+    st.markdown("<div class='block'>", unsafe_allow_html=True)
+    st.subheader("📜 Histórico")
+    st.markdown("<div class='history'>", unsafe_allow_html=True)
+    for n in st.session_state.historico:
+        cor = cor_numero(n)
+        st.markdown(f"<div class='ball ball-{cor}'>{n}</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with col2:
+    # Bloco: Predição
     st.markdown("<div class='block prediction-box'>", unsafe_allow_html=True)
     st.subheader("🔮 Predição")
     numero_previsto, vizinhos, confianca = prever_proximo()
