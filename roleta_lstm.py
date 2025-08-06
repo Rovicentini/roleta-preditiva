@@ -1,5 +1,6 @@
 import streamlit as st
 import numpy as np
+import time
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 
@@ -13,7 +14,6 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap');
     * { font-family: 'Space Grotesk', sans-serif; }
 
-    /* Fundo animado */
     body {
         background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
         background-size: 400% 400%;
@@ -70,7 +70,7 @@ st.markdown("""
     .preto { background: #1e1e1e; box-shadow: 0 0 12px rgba(255,255,255,0.3); }
     .verde { background: #21c55d; box-shadow: 0 0 12px rgba(0,255,0,0.6); }
 
-    /* Caixa de previsão com glow pulsante */
+    /* Caixa de previsão */
     .prediction-box {
         font-size: 48px; font-weight: bold; text-align: center;
         color: #00ffc6; padding: 20px;
@@ -85,6 +85,37 @@ st.markdown("""
         50% { box-shadow: 0 0 25px rgba(0,255,198,0.7); }
         100% { box-shadow: 0 0 10px rgba(0,255,198,0.2); }
     }
+
+    /* Animação da roleta */
+    .roulette-wheel {
+        width: 180px;
+        height: 180px;
+        margin: auto;
+        border: 10px solid rgba(255,255,255,0.2);
+        border-radius: 50%;
+        background: conic-gradient(#d72638 0deg 9.7deg, #1e1e1e 9.7deg 19.4deg, 
+                                  #d72638 19.4deg 29.1deg, #1e1e1e 29.1deg 38.8deg,
+                                  #d72638 38.8deg 48.5deg, #1e1e1e 48.5deg 58.2deg,
+                                  #21c55d 58.2deg 68deg, #d72638 68deg 77.7deg,
+                                  #1e1e1e 77.7deg 87.4deg, #d72638 87.4deg 97.1deg,
+                                  #1e1e1e 97.1deg 106.8deg, #d72638 106.8deg 116.5deg,
+                                  #1e1e1e 116.5deg 126.2deg, #d72638 126.2deg 135.9deg,
+                                  #1e1e1e 135.9deg 145.6deg, #d72638 145.6deg 155.3deg,
+                                  #1e1e1e 155.3deg 165deg, #d72638 165deg 174.7deg,
+                                  #1e1e1e 174.7deg 184.4deg, #d72638 184.4deg 194.1deg,
+                                  #1e1e1e 194.1deg 203.8deg, #d72638 203.8deg 213.5deg,
+                                  #1e1e1e 213.5deg 223.2deg, #d72638 223.2deg 232.9deg,
+                                  #1e1e1e 232.9deg 242.6deg, #d72638 242.6deg 252.3deg,
+                                  #1e1e1e 252.3deg 262deg, #d72638 262deg 271.7deg,
+                                  #1e1e1e 271.7deg 281.4deg, #d72638 281.4deg 291.1deg,
+                                  #1e1e1e 291.1deg 300.8deg, #d72638 300.8deg 310.5deg,
+                                  #1e1e1e 310.5deg 320.2deg, #d72638 320.2deg 329.9deg,
+                                  #1e1e1e 329.9deg 339.6deg, #d72638 339.6deg 349.3deg,
+                                  #1e1e1e 349.3deg 360deg);
+        animation: spin 1s linear infinite;
+        box-shadow: 0 0 25px rgba(255,255,255,0.3);
+    }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
     </style>
 """, unsafe_allow_html=True)
 
@@ -179,13 +210,19 @@ with col_hist:
         st.info("Nenhum número inserido ainda.")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# 🔮 BLOCO PREVISÃO
+# 🔮 BLOCO PREVISÃO COM ROLETA
 with col_prev:
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
     st.subheader("🔮 Próxima Previsão")
+
     prox = prever_proximo()
     if prox is not None:
-        st.markdown(f"<div class='prediction-box'>🎯 {prox}</div>", unsafe_allow_html=True)
+        placeholder = st.empty()
+        with placeholder:
+            st.markdown("<div class='roulette-wheel'></div>", unsafe_allow_html=True)
+        time.sleep(2.5)  # Tempo de rotação da roleta
+        placeholder.markdown(f"<div class='prediction-box'>🎯 {prox}</div>", unsafe_allow_html=True)
     else:
         st.info("Insira pelo menos 10 números para prever.")
+
     st.markdown("</div>", unsafe_allow_html=True)
