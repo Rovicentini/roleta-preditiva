@@ -1,14 +1,14 @@
 import streamlit as st
 import numpy as np
 import time
-from collections import Counter
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
+from collections import Counter
 
 st.set_page_config(page_title="Roleta Preditiva", page_icon="🎰", layout="wide")
 
 # ==============================
-# 🌌 Estilo Lovable Futurista (mantido)
+# 🌌 Estilo Lovable Futurista
 # ==============================
 st.markdown("""
     <style>
@@ -27,7 +27,6 @@ st.markdown("""
         100% { background-position: 0% 50%; }
     }
 
-    /* Cartões estilo vidro */
     .glass-card {
         background: rgba(255, 255, 255, 0.05);
         backdrop-filter: blur(12px);
@@ -38,7 +37,6 @@ st.markdown("""
         box-shadow: 0 0 20px rgba(0, 255, 198, 0.2);
     }
 
-    /* Inputs e botões futuristas */
     .stTextInput input, .stTextArea textarea {
         background: rgba(255,255,255,0.07);
         color: #fff;
@@ -59,11 +57,10 @@ st.markdown("""
     }
     .stButton>button:hover { transform: scale(1.05); }
 
-    /* Histórico em bolhas neon */
     .historico-bolhas {
-        display: flex; 
+        display: flex;
         flex-wrap: nowrap;
-        gap: 8px; 
+        gap: 8px;
         overflow-x: auto;
         padding-bottom: 8px;
     }
@@ -78,7 +75,6 @@ st.markdown("""
     .preto { background: #1e1e1e; box-shadow: 0 0 12px rgba(255,255,255,0.3); }
     .verde { background: #21c55d; box-shadow: 0 0 12px rgba(0,255,0,0.6); }
 
-    /* Caixa de previsão */
     .prediction-box {
         font-size: 28px; font-weight: bold; text-align: center;
         color: #00ffc6; padding: 15px;
@@ -94,7 +90,6 @@ st.markdown("""
         100% { box-shadow: 0 0 10px rgba(0,255,198,0.2); }
     }
 
-    /* Animação da roleta */
     .roulette-wheel {
         width: 180px;
         height: 180px;
@@ -143,58 +138,47 @@ def cor_roleta(num):
 def treinar_modelo():
     dados = np.array(st.session_state.historico)
     X, y = [], []
-    for i in range(len(dados)-19):
-        X.append(dados[i:i+19])
-        y.append(dados[i+19])
+    for i in range(len(dados)-29):  # janela de 30
+        X.append(dados[i:i+29])
+        y.append(dados[i+29])
     X, y = np.array(X), np.array(y)
     X = X.reshape((X.shape[0], X.shape[1], 1))
     modelo = Sequential()
-    modelo.add(LSTM(50, activation='relu', input_shape=(19, 1)))
+    modelo.add(LSTM(64, activation='relu', input_shape=(29, 1)))
     modelo.add(Dense(1))
     modelo.compile(optimizer='adam', loss='mse')
-    modelo.fit(X, y, epochs=20, verbose=0)
+    modelo.fit(X, y, epochs=25, verbose=0)
     return modelo
 
 def prever_multiplos():
-    if len(st.session_state.historico) < 10:
-        return []
+    if len(st.session_state.historico) < 30:
+        return None
+    if st.session_state.modelo is None:
+        st.session_state.modelo = treinar_modelo()
 
-    ultimos = st.session_state.historico[-50:]  # últimos 50 para análises
-    ranking = Counter()
+    janela = np.array(st.session_state.historico[-29:]).reshape((1,29,1))
+    pred_lstm = int(np.clip(np.round(st.session_state.modelo.predict(janela, verbose=0)[0,0]),0,36))
 
-    # 1️⃣ Previsão LSTM
-    if st.session_state.modelo:
-        janela = min(19, len(st.session_state.historico))
-        entrada = np.array(st.session_state.historico[-janela:]).reshape((1, janela, 1))
-        if janela < 19:
-            entrada = np.concatenate([np.zeros((1, 19-janela, 1)), entrada], axis=1)
-        pred = int(np.clip(np.round(st.session_state.modelo.predict(entrada, verbose=0)[0, 0]), 0, 36))
-        ranking[pred] += 3  # peso maior
+    # Frequência histórica
+    freq = Counter(st.session_state.historico)
+    mais_frequentes = [n for n,_ in freq.most_common(6)]
 
-    # 2️⃣ Frequência dos últimos 50
-    freq = Counter(ultimos)
-    for num, count in freq.most_common(5):
-        ranking[num] += 2
+    # Correlação "puxa número"
+    correlacao = Counter()
+    for i in range(len(st.session_state.historico)-1):
+        if st.session_state.historico[i] == pred_lstm:
+            correlacao[st.session_state.historico[i+1]] += 1
+    correlados = [n for n,_ in correlacao.most_common(4)]
 
-    # 3️⃣ Correlação simples ("número puxa número")
-    correlacoes = {n: ultimos[i+1] for i, n in enumerate(ultimos[:-1])}
-    if ultimos[-1] in correlacoes:
-        ranking[correlacoes[ultimos[-1]]] += 2
+    # Score combinado
+    scores = Counter()
+    for n in range(37):
+        scores[n] += 3 if n==pred_lstm else 0
+        scores[n] += 2 if n in mais_frequentes else 0
+        scores[n] += 2 if n in correlados else 0
 
-    # 4️⃣ Reversão de cor
-    ult_cor = [cor_roleta(n) for n in ultimos[-5:]]
-    if len(set(ult_cor)) == 1:  # mesma cor repetida
-        if ult_cor[-1] == "vermelho":
-            for p in {2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35}:
-                ranking[p] += 1
-        else:
-            for v in {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}:
-                ranking[v] += 1
-
-    # Normaliza e retorna Top 5 com probabilidades
-    total = sum(ranking.values())
-    top5 = [(n, round((c/total)*100,1)) for n,c in ranking.most_common(5)]
-    return top5
+    melhores = [n for n,_ in scores.most_common(5)]
+    return melhores
 
 def inserir_numero():
     if st.session_state.input.strip().isdigit():
@@ -202,7 +186,7 @@ def inserir_numero():
         if 0 <= n <= 36:
             st.session_state.historico.append(n)
             st.session_state.contador_treinamento += 1
-            if len(st.session_state.historico) >= 20 and st.session_state.contador_treinamento >= 5:
+            if len(st.session_state.historico) >= 30 and st.session_state.contador_treinamento >= 5:
                 st.session_state.modelo = treinar_modelo()
                 st.session_state.contador_treinamento = 0
     st.session_state.input = ""
@@ -215,28 +199,26 @@ def inserir_em_massa():
         if 0 <= n <= 36:
             st.session_state.historico.append(n)
     st.session_state.massa = ""
-    if len(st.session_state.historico) >= 20:
+    if len(st.session_state.historico) >= 30:
         st.session_state.modelo = treinar_modelo()
 
 # ==============================
 # UI Principal
 # ==============================
 st.markdown("<h1 style='text-align:center;'>🎰 Roleta Preditiva Inteligente</h1>", unsafe_allow_html=True)
-
 col_input, col_hist, col_prev = st.columns([1.5, 2, 1])
 
-# 🔢 Inserção
+# Inserção
 with col_input:
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
     st.subheader("➕ Inserir Número Único")
     st.text_input("Digite um número (0 a 36):", key="input", on_change=inserir_numero)
-
     st.subheader("📥 Inserir em Massa")
     st.text_area("Cole vários números separados por espaço, vírgula ou ponto e vírgula:", key="massa")
     st.button("Adicionar Números em Massa", on_click=inserir_em_massa)
     st.markdown("</div>", unsafe_allow_html=True)
 
-# 📜 Histórico
+# Histórico
 with col_hist:
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
     st.subheader("📜 Histórico (Últimos 30)")
@@ -250,22 +232,18 @@ with col_hist:
         st.info("Nenhum número inserido ainda.")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# 🔮 Previsão com ranking
+# Previsão
 with col_prev:
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.subheader("🔮 Próximas Previsões")
-
-    preds = prever_multiplos()
-    if preds:
+    st.subheader("🔮 Números Mais Prováveis")
+    previsoes = prever_multiplos()
+    if previsoes:
         placeholder = st.empty()
         with placeholder:
             st.markdown("<div class='roulette-wheel'></div>", unsafe_allow_html=True)
-        time.sleep(2.5)
-        st.markdown("<div class='prediction-box'>", unsafe_allow_html=True)
-        for n, p in preds:
-            st.markdown(f"<p style='margin:4px;'>🎯 Número <b>{n}</b> - {p}%</p>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        time.sleep(2)
+        pred_html = "".join([f"<div class='prediction-box'>🎯 {p}</div>" for p in previsoes])
+        st.markdown(pred_html, unsafe_allow_html=True)
     else:
-        st.info("Insira pelo menos 10 números para gerar previsões.")
-
+        st.info("Insira pelo menos 30 números para prever.")
     st.markdown("</div>", unsafe_allow_html=True)
