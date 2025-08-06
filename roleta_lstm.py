@@ -1,194 +1,114 @@
 import streamlit as st
 import numpy as np
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
+import plotly.express as px
 
-# Estilo CSS para manter o layout aprovado
-st.set_page_config(page_title="Roleta Preditiva", layout="wide")
-st.markdown("""
-    <style>
-        body {
-            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
-            color: #fff;
-            font-family: 'Segoe UI', sans-serif;
-        }
-        .stApp {
-            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
-        }
-        .title {
-            font-size: 38px;
-            font-weight: bold;
-            text-align: center;
-            color: #ffffff;
-            margin-bottom: 10px;
-        }
-        .prediction-box {
-            background: rgba(255,255,255,0.08);
-            padding: 25px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            text-align: center;
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-        .prediction-number {
-            font-size: 60px;
-            font-weight: bold;
-            color: #4fff9f;
-        }
-        .neighbors {
-            font-size: 20px;
-            color: #ffd166;
-        }
-        .confidence {
-            font-size: 18px;
-            color: #06d6a0;
-            margin-top: 10px;
-        }
-        .history {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin-top: 10px;
-            overflow-x: auto;
-            padding-bottom: 8px;
-        }
-        .ball {
-            min-width: 45px;
-            height: 45px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 16px;
-            color: white;
-            user-select: none;
-            flex-shrink: 0;
-        }
-        .ball-red { background: #d90429; }
-        .ball-black { background: #222; }
-        .ball-green { background: #1b9c85; }
-        .block {
-            background: rgba(255,255,255,0.05);
-            padding: 20px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-        }
-        /* Ajusta o input para ter foco mais agradável */
-        input[type=number] {
-            background: rgba(255,255,255,0.1);
-            border: none;
-            color: white;
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-size: 18px;
-            width: 100%;
-        }
-        input[type=number]::placeholder {
-            color: #ccc;
-        }
-        input[type=number]:focus {
-            outline: 2px solid #06d6a0;
-            background: rgba(255,255,255,0.15);
-        }
-    </style>
-""", unsafe_allow_html=True)
+# Inicializa histórico se não existir
+if 'historico' not in st.session_state:
+    st.session_state.historico = []
 
+# Função para limpar o input e adicionar o número ao histórico
+def inserir_numero():
+    if st.session_state.input_numero not in st.session_state.historico:
+        st.session_state.historico.insert(0, st.session_state.input_numero)
+    st.session_state.input_numero = 0  # limpa campo de input
 
-def criar_modelo():
-    model = Sequential([
-        LSTM(32, input_shape=(19, 1)),
-        Dense(1, activation='linear')
-    ])
-    model.compile(optimizer='adam', loss='mse')
-    return model
-
-
+# Função para prever próximo número (exemplo simples, ajuste conforme seu modelo)
 def prever_proximo():
     if len(st.session_state.historico) < 19:
-        return None, [], "Aguardando mais dados"
-    entrada = np.array(st.session_state.historico[-19:]).reshape((1, 19, 1))
-    pred = st.session_state.modelo.predict(entrada, verbose=0)
-    numero_previsto = int(np.round(pred[0][0])) % 37
+        return None
+    entrada = np.array(st.session_state.historico[:19]).reshape((1, 19, 1))
+    # Aqui sua lógica de predição, placeholder:
+    proximo_numero = (st.session_state.historico[0] + 1) % 37
+    return proximo_numero
 
-    frequencia = {n: st.session_state.historico.count(n) for n in set(st.session_state.historico)}
-    if numero_previsto in frequencia and frequencia[numero_previsto] > 3:
-        numero_previsto = (numero_previsto + 5) % 37
+# Layout moderno e limpo
+st.markdown("""
+<style>
+    .main-container {
+        background: linear-gradient(135deg, #1f1c2c, #928dab);
+        color: #f0f0f0;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        padding: 25px;
+        border-radius: 15px;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+        max-width: 700px;
+        margin: 30px auto;
+    }
+    .header {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 15px;
+        text-align: center;
+        letter-spacing: 2px;
+    }
+    .input-section {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 20px;
+    }
+    .historic-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+        margin-bottom: 20px;
+    }
+    .number-box {
+        width: 45px;
+        height: 45px;
+        border-radius: 8px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-weight: 700;
+        font-size: 1.1rem;
+        color: #fff;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+        user-select: none;
+    }
+    .number-red { background-color: #d32f2f; }
+    .number-black { background-color: #212121; }
+    .number-green { background-color: #388e3c; }
+    .prediction {
+        text-align: center;
+        font-size: 1.3rem;
+        margin-top: 10px;
+        font-weight: 600;
+        color: #ffe066;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    ultimos = st.session_state.historico[-10:]
-    dispersao = len(set(ultimos))
-    vizinhos = 1 if dispersao > 7 else 2 if dispersao > 4 else 3
+with st.container():
+    st.markdown('<div class="main-container">', unsafe_allow_html=True)
+    st.markdown('<div class="header">Roleta Preditiva - Histórico e Previsão</div>', unsafe_allow_html=True)
 
-    numeros_vizinhos = [(numero_previsto + i) % 37 for i in range(-vizinhos, vizinhos+1)]
-    confianca = "ALTA" if vizinhos == 1 else "MÉDIA" if vizinhos == 2 else "BAIXA"
-
-    return numero_previsto, numeros_vizinhos, confianca
-
-
-def cor_numero(numero):
-    if numero == 0:
-        return "green"
-    vermelhos = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
-    return "red" if numero in vermelhos else "black"
-
-
-# Estado inicial
-if "historico" not in st.session_state:
-    st.session_state.historico = []
-if "modelo" not in st.session_state:
-    st.session_state.modelo = criar_modelo()
-if "input_numero" not in st.session_state:
-    st.session_state.input_numero = 0
-
-st.markdown("<div class='title'>🎰 Roleta Preditiva Inteligente</div>", unsafe_allow_html=True)
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.markdown("<div class='block'>", unsafe_allow_html=True)
-    st.subheader("🎯 Inserir Números")
-
-    # Caixa para digitar o número, salva ao apertar Enter
-    numero = st.number_input(
-        "Informe o número (0 a 36) e pressione ENTER:",
+    # Input número com on_change para limpar e adicionar ao histórico
+    st.number_input(
+        "Informe o número sorteado (0 a 36) e pressione ENTER:",
         min_value=0, max_value=36, step=1,
         key="input_numero",
-        on_change=lambda: st.session_state.historico.insert(0, st.session_state.input_numero)
+        on_change=inserir_numero
     )
 
-    # Limpar o campo após inserção
-    if len(st.session_state.historico) > 0 and st.session_state.historico[0] == st.session_state.input_numero:
-        st.session_state.input_numero = 0  # limpa input
+    # Histórico - último número à esquerda
+    st.markdown('<div class="historic-container">', unsafe_allow_html=True)
+    for num in st.session_state.historico:
+        # Definir cores conforme roleta europeia
+        if num == 0:
+            color_class = "number-green"
+        elif num in [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]:
+            color_class = "number-red"
+        else:
+            color_class = "number-black"
+        st.markdown(f'<div class="number-box {color_class}">{num}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # Inserção em massa
-    st.text_area("Inserir números em massa (separados por vírgula):", key="massa")
-    if st.button("Adicionar em Massa"):
-        nums = [int(x.strip()) for x in st.session_state.massa.split(",") if x.strip().isdigit()]
-        for n in reversed(nums):
-            st.session_state.historico.insert(0, n)
-        if len(st.session_state.historico) > 200:
-            st.session_state.historico = st.session_state.historico[:200]
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Histórico dos números lado a lado
-    st.markdown("<div class='block'>", unsafe_allow_html=True)
-    st.subheader("📜 Histórico")
-    st.markdown("<div class='history'>", unsafe_allow_html=True)
-    for n in st.session_state.historico:
-        cor = cor_numero(n)
-        st.markdown(f"<div class='ball ball-{cor}'>{n}</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with col2:
-    st.markdown("<div class='block prediction-box'>", unsafe_allow_html=True)
-    st.subheader("🔮 Predição")
-    numero_previsto, vizinhos, confianca = prever_proximo()
-    if numero_previsto is not None:
-        st.markdown(f"<div class='prediction-number'>{numero_previsto}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='neighbors'>Aposte também nos vizinhos: {', '.join(map(str, vizinhos))}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='confidence'>Confiança: {confianca}</div>", unsafe_allow_html=True)
+    # Previsão
+    proximo = prever_proximo()
+    if proximo is not None:
+        st.markdown(f'<div class="prediction">Próximo número previsto: <strong>{proximo}</strong></div>', unsafe_allow_html=True)
     else:
-        st.info("Insira pelo menos 19 números para iniciar a predição.")
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('<div class="prediction">Insira pelo menos 19 números para iniciar a previsão.</div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
