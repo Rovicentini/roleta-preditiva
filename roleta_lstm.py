@@ -1,114 +1,64 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
-import joblib
-import os
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
-from tensorflow.keras.optimizers import Adam
-from sklearn.preprocessing import MinMaxScaler
+import numpy as np
 
-# === Arquivos locais ===
-history_path = "roleta_historico.csv"
-model_path = "roleta_model_lstm.h5"
-scaler_path = "scaler.pkl"
+# --- Configuração da página ---
+st.set_page_config(page_title="Roleta Preditiva", layout="centered")
 
-# === Funções base ===
-def load_history():
-    if os.path.exists(history_path):
-        return pd.read_csv(history_path)
-    else:
-        return pd.DataFrame(columns=["Rodada", "Número"])
+# --- Estilos personalizados ---
+st.markdown("""
+    <style>
+    .stTextInput>div>div>input {
+        font-size: 20px;
+        text-align: center;
+    }
+    .stButton>button {
+        width: 100%;
+        font-size: 18px;
+        margin-top: 10px;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-def save_history(df):
-    df.to_csv(history_path, index=False)
+# --- Sessão de histórico ---
+if "historico" not in st.session_state:
+    st.session_state.historico = []
 
-def preprocess_data(sequence_length=10):
-    """Prepara os dados para treino da rede LSTM"""
-    numeros = historico["Número"].values.reshape(-1, 1)
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    numeros_scaled = scaler.fit_transform(numeros)
+# --- Título ---
+st.title("🎰 Roleta Preditiva")
+st.write("Insira os números que saíram na roleta para identificar padrões e gerar previsões.")
 
-    X, y = [], []
-    for i in range(sequence_length, len(numeros_scaled)):
-        X.append(numeros_scaled[i-sequence_length:i, 0])
-        y.append(numeros_scaled[i, 0])
-    X, y = np.array(X), np.array(y)
-    X = X.reshape((X.shape[0], X.shape[1], 1))
+# --- Campo para inserir número ---
+numero = st.text_input("Digite o número (0 a 36) e pressione Enter:", key="num_input")
 
-    joblib.dump(scaler, scaler_path)
-    return X, y, scaler
+# --- Ao pressionar Enter ---
+if numero:
+    try:
+        num = int(numero)
+        if 0 <= num <= 36:
+            st.session_state.historico.append(num)
+            st.session_state.num_input = ""  # limpa campo automaticamente
+        else:
+            st.warning("Digite apenas números entre 0 e 36.")
+    except:
+        st.warning("Digite um número válido.")
 
-def criar_modelo(sequence_length=10):
-    """Cria a rede neural LSTM"""
-    model = Sequential()
-    model.add(LSTM(50, activation='relu', input_shape=(sequence_length, 1)))
-    model.add(Dense(1))
-    model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
-    return model
+# --- Mostrar histórico ---
+if st.session_state.historico:
+    st.subheader("📜 Histórico de números inseridos")
+    hist_str = " → ".join(map(str, st.session_state.historico[::-1]))
+    st.markdown(f"**Últimos números (mais recente à esquerda):**  \n{hist_str}")
 
-def treinar_modelo():
-    if len(historico) < 20:
-        return None  # poucos dados para treinar
-    X, y, scaler = preprocess_data()
-    model = criar_modelo()
-    model.fit(X, y, epochs=100, batch_size=8, verbose=0)
-    model.save(model_path)
-    return model
+    # Botão para limpar histórico
+    if st.button("🗑️ Limpar histórico"):
+        st.session_state.historico.clear()
 
-def prever_proximos(qtd=5):
-    if len(historico) < 20:
-        return [], []
-    scaler = joblib.load(scaler_path)
-    numeros = historico["Número"].values.reshape(-1, 1)
-    numeros_scaled = scaler.transform(numeros)
-
-    ultima_seq = numeros_scaled[-10:].reshape((1, 10, 1))
-    preds = []
-
-    modelo = criar_modelo()
-    modelo.load_weights(model_path)
-
-    for _ in range(qtd):
-        pred_scaled = modelo.predict(ultima_seq, verbose=0)
-        pred = scaler.inverse_transform(pred_scaled)[0][0]
-        pred_round = int(np.clip(round(pred), 0, 36))
-        preds.append(pred_round)
-
-        # atualiza sequência com previsão simulada
-        nova_seq = np.append(ultima_seq[:, 1:, :], [[[pred_scaled[0][0]]]], axis=1)
-        ultima_seq = nova_seq
-
-    return preds, None
-
-# === Interface Streamlit ===
-st.set_page_config(page_title="🎰 Painel Inteligente da Roleta (LSTM)", layout="centered")
-
-historico = load_history()
-st.title("🎰 Painel Inteligente da Roleta com IA LSTM")
-
-numero = st.number_input("Digite o número sorteado (0 a 36):", min_value=0, max_value=36, step=1)
-if st.button("Adicionar Número"):
-    nova_rodada = len(historico) + 1
-    historico = pd.concat([historico, pd.DataFrame({"Rodada": [nova_rodada], "Número": [numero]})], ignore_index=True)
-    save_history(historico)
-
-    if len(historico) >= 20:
-        st.info("Treinando modelo com base nos últimos resultados...")
-        treinar_modelo()
-
-    st.success(f"Número {int(numero)} adicionado com sucesso!")
-
-    preds, _ = prever_proximos()
-    if preds:
-        st.subheader("🔮 Próximos números prováveis (IA LSTM)")
-        st.write("➡️ " + ", ".join([str(p) for p in preds]))
-    else:
-        st.warning("Poucos dados para prever. Insira pelo menos 20 rodadas.")
-
-    # Mostrar gráfico de frequência
-    freq = historico["Número"].value_counts().reindex(range(37), fill_value=0)
-    df = pd.DataFrame({"Número": range(37), "Frequência": freq})
-    fig = px.bar(df, x="Número", y="Frequência", title="Heatmap de Frequência da Roleta")
-    st.plotly_chart(fig)
+# --- Placeholder de previsão ---
+st.subheader("🔮 Próxima previsão")
+if len(st.session_state.historico) >= 6:
+    st.info("Modelo em execução... (Previsões reais serão implementadas na próxima etapa)")
+else:
+    st.warning("Insira pelo menos 6 números para gerar previsões.")
