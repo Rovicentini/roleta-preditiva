@@ -4,25 +4,28 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 
 # ==============================
-# 🎨 Layout Moderno
+# 🎨 Layout Ultra Moderno
 # ==============================
 st.set_page_config(page_title="Roleta Preditiva", page_icon="🎰", layout="wide")
 
 st.markdown("""
     <style>
     body {
-        background-color: #0d0f1a;
+        background-color: #0b0f19;
         color: #fafafa;
     }
     .stApp {
-        background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+        background: linear-gradient(135deg, #050d1a, #101d34, #1b2b4a);
         font-family: 'Roboto', sans-serif;
     }
-    .stTextInput input {
-        background: #1c1c1e;
+    h1, h2, h3, h4 {
+        color: #00ffc6;
+    }
+    .stTextInput input, .stTextArea textarea {
+        background: #121212;
         color: #00ffc6;
         border: 2px solid #00ffc6;
-        border-radius: 10px;
+        border-radius: 12px;
         font-size: 22px;
         text-align: center;
     }
@@ -30,21 +33,47 @@ st.markdown("""
         background: linear-gradient(90deg, #00ffc6, #00b894);
         color: #000;
         font-weight: bold;
-        border-radius: 10px;
+        border-radius: 12px;
         padding: 10px 20px;
         font-size: 18px;
+        transition: all 0.2s ease-in-out;
+    }
+    .stButton>button:hover {
+        transform: scale(1.05);
     }
     .prediction-box {
         text-align: center;
-        font-size: 42px;
+        font-size: 46px;
         font-weight: bold;
         color: #00ffc6;
         background: rgba(0, 255, 198, 0.08);
         padding: 25px;
-        border-radius: 12px;
+        border-radius: 16px;
         border: 2px solid #00ffc6;
         margin-top: 20px;
+        box-shadow: 0px 0px 20px rgba(0, 255, 198, 0.4);
     }
+    .historico-bolhas {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+    }
+    .bolha {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        font-weight: bold;
+        border-radius: 50%;
+        font-size: 18px;
+        color: #fff;
+        box-shadow: 0px 0px 6px rgba(0,0,0,0.4);
+    }
+    .vermelho { background: #d72638; }
+    .preto { background: #1e1e1e; }
+    .verde { background: #21c55d; color: #fff; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -57,6 +86,16 @@ if "modelo" not in st.session_state:
     st.session_state.modelo = None
 if "contador_treinamento" not in st.session_state:
     st.session_state.contador_treinamento = 0
+
+# ==============================
+# 🎨 Função Cores da Roleta
+# ==============================
+def cor_roleta(numero):
+    vermelhos = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
+    pretos = {2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35}
+    if numero == 0:
+        return "verde"
+    return "vermelho" if numero in vermelhos else "preto"
 
 # ==============================
 # 🧠 Função de Treinamento
@@ -104,7 +143,7 @@ def inserir_numero_unico():
             if len(st.session_state.historico) >= 20 and st.session_state.contador_treinamento >= 5:
                 st.session_state.modelo = treinar_modelo()
                 st.session_state.contador_treinamento = 0
-    st.session_state.input_numero = ""  # limpa sem refresh
+    st.session_state.input_numero = ""  # limpa rápido
 
 def inserir_varios_numeros():
     numeros_str = st.session_state.input_varios.strip()
@@ -115,7 +154,7 @@ def inserir_varios_numeros():
             st.session_state.historico.append(numero)
     if len(st.session_state.historico) >= 20:
         st.session_state.modelo = treinar_modelo()
-    st.session_state.input_varios = ""  # limpa campo
+    st.session_state.input_varios = ""  # limpa rápido
 
 # ==============================
 # 🖥️ Interface
@@ -124,15 +163,20 @@ st.title("🎰 Roleta Preditiva Inteligente")
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("➕ Inserir Número Rápido")
+    st.subheader("➕ Inserir Número")
     st.text_input("Digite um número (0 a 36):", key="input_numero", on_change=inserir_numero_unico)
-    st.subheader("📥 Inserir Vários Números")
+    st.subheader("📥 Inserir Vários")
     st.text_area("Cole aqui (ex: 12, 5, 8, 19, 0, 32):", key="input_varios")
     st.button("Adicionar em Lote", on_click=inserir_varios_numeros)
 
     if st.session_state.historico:
         st.subheader("📜 Histórico (Últimos 30)")
-        st.write(", ".join(map(str, st.session_state.historico[-30:])))
+        bolhas_html = "<div class='historico-bolhas'>"
+        for num in reversed(st.session_state.historico[-30:]):  # Último à esquerda
+            cor = cor_roleta(num)
+            bolhas_html += f"<div class='bolha {cor}'>{num}</div>"
+        bolhas_html += "</div>"
+        st.markdown(bolhas_html, unsafe_allow_html=True)
 
 with col2:
     st.subheader("🔮 Previsão")
