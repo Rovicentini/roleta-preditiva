@@ -3,11 +3,8 @@ import numpy as np
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 
-# =============================
-# CONFIGURAÇÃO DE ESTILO (layout aprovado)
-# =============================
+# Estilo CSS para manter o layout aprovado
 st.set_page_config(page_title="Roleta Preditiva", layout="wide")
-
 st.markdown("""
     <style>
         body {
@@ -52,9 +49,11 @@ st.markdown("""
             flex-wrap: wrap;
             gap: 6px;
             margin-top: 10px;
+            overflow-x: auto;
+            padding-bottom: 8px;
         }
         .ball {
-            width: 45px;
+            min-width: 45px;
             height: 45px;
             border-radius: 50%;
             display: flex;
@@ -63,6 +62,8 @@ st.markdown("""
             font-weight: bold;
             font-size: 16px;
             color: white;
+            user-select: none;
+            flex-shrink: 0;
         }
         .ball-red { background: #d90429; }
         .ball-black { background: #222; }
@@ -73,12 +74,27 @@ st.markdown("""
             border-radius: 12px;
             margin-bottom: 20px;
         }
+        /* Ajusta o input para ter foco mais agradável */
+        input[type=number] {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 18px;
+            width: 100%;
+        }
+        input[type=number]::placeholder {
+            color: #ccc;
+        }
+        input[type=number]:focus {
+            outline: 2px solid #06d6a0;
+            background: rgba(255,255,255,0.15);
+        }
     </style>
 """, unsafe_allow_html=True)
 
-# =============================
-# FUNÇÕES
-# =============================
+
 def criar_modelo():
     model = Sequential([
         LSTM(32, input_shape=(19, 1)),
@@ -87,10 +103,10 @@ def criar_modelo():
     model.compile(optimizer='adam', loss='mse')
     return model
 
+
 def prever_proximo():
     if len(st.session_state.historico) < 19:
         return None, [], "Aguardando mais dados"
-    
     entrada = np.array(st.session_state.historico[-19:]).reshape((1, 19, 1))
     pred = st.session_state.modelo.predict(entrada, verbose=0)
     numero_previsto = int(np.round(pred[0][0])) % 37
@@ -108,52 +124,54 @@ def prever_proximo():
 
     return numero_previsto, numeros_vizinhos, confianca
 
+
 def cor_numero(numero):
     if numero == 0:
         return "green"
     vermelhos = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
     return "red" if numero in vermelhos else "black"
 
-# =============================
-# ESTADO INICIAL
-# =============================
+
+# Estado inicial
 if "historico" not in st.session_state:
     st.session_state.historico = []
 if "modelo" not in st.session_state:
     st.session_state.modelo = criar_modelo()
+if "input_numero" not in st.session_state:
+    st.session_state.input_numero = 0
 
-# =============================
-# LAYOUT PRINCIPAL
-# =============================
 st.markdown("<div class='title'>🎰 Roleta Preditiva Inteligente</div>", unsafe_allow_html=True)
 
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    # Bloco: Inserção de Números
     st.markdown("<div class='block'>", unsafe_allow_html=True)
     st.subheader("🎯 Inserir Números")
-    numero = st.number_input("Informe o número (0 a 36) e pressione ENTER:", min_value=0, max_value=36, step=1, key="input_numero")
 
-    # Insere número automaticamente ao pressionar Enter
-    if st.session_state.input_numero not in st.session_state.historico or st.session_state.get("ultimo_inserido") != st.session_state.input_numero:
-        if st.session_state.input_numero != 0 or len(st.session_state.historico) > 0:  
-            st.session_state.historico.insert(0, int(numero))
-            st.session_state.ultimo_inserido = st.session_state.input_numero
-            if len(st.session_state.historico) > 200:
-                st.session_state.historico = st.session_state.historico[:200]
+    # Caixa para digitar o número, salva ao apertar Enter
+    numero = st.number_input(
+        "Informe o número (0 a 36) e pressione ENTER:",
+        min_value=0, max_value=36, step=1,
+        key="input_numero",
+        on_change=lambda: st.session_state.historico.insert(0, st.session_state.input_numero)
+    )
+
+    # Limpar o campo após inserção
+    if len(st.session_state.historico) > 0 and st.session_state.historico[0] == st.session_state.input_numero:
+        st.session_state.input_numero = 0  # limpa input
 
     # Inserção em massa
     st.text_area("Inserir números em massa (separados por vírgula):", key="massa")
     if st.button("Adicionar em Massa"):
         nums = [int(x.strip()) for x in st.session_state.massa.split(",") if x.strip().isdigit()]
-        for n in nums[::-1]:
+        for n in reversed(nums):
             st.session_state.historico.insert(0, n)
         if len(st.session_state.historico) > 200:
             st.session_state.historico = st.session_state.historico[:200]
+
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Bloco: Histórico (lado a lado)
+    # Histórico dos números lado a lado
     st.markdown("<div class='block'>", unsafe_allow_html=True)
     st.subheader("📜 Histórico")
     st.markdown("<div class='history'>", unsafe_allow_html=True)
@@ -164,7 +182,6 @@ with col1:
     st.markdown("</div>", unsafe_allow_html=True)
 
 with col2:
-    # Bloco: Predição
     st.markdown("<div class='block prediction-box'>", unsafe_allow_html=True)
     st.subheader("🔮 Predição")
     numero_previsto, vizinhos, confianca = prever_proximo()
