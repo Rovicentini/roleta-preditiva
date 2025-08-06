@@ -1,162 +1,127 @@
 import streamlit as st
 import numpy as np
-import pandas as pd
-import plotly.express as px
+import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
-from tensorflow.keras.optimizers import Adam
+import plotly.express as px
 
-# --- Configurações da página ---
-st.set_page_config(
-    page_title="Roleta Preditiva",
-    page_icon="🎰",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# Inicializar variáveis de sessão
+if "historico" not in st.session_state:
+    st.session_state.historico = []
 
-# --- Estilos customizados (CSS) ---
+if "modelo" not in st.session_state:
+    st.session_state.modelo = None
+
+if "limpar_input" not in st.session_state:
+    st.session_state.limpar_input = False
+
+if "input_numero" not in st.session_state:
+    st.session_state.input_numero = ""
+
+# Função para treinar o modelo
+def treinar_modelo():
+    if len(st.session_state.historico) < 10:
+        return  # Treina só com pelo menos 10 números
+    dados = np.array(st.session_state.historico[-20:])  # pegar últimos 20 números
+    dados = dados.reshape((1, len(dados), 1))
+    labels = dados[:, 1:, :]
+    dados = dados[:, :-1, :]
+
+    modelo = Sequential()
+    modelo.add(LSTM(50, activation='relu', input_shape=(dados.shape[1], dados.shape[2])))
+    modelo.add(Dense(1))
+    modelo.compile(optimizer='adam', loss='mse')
+
+    modelo.fit(dados, labels, epochs=100, verbose=0)
+    st.session_state.modelo = modelo
+
+# Função para prever próximo número
+def prever_proximo():
+    if st.session_state.modelo is None or len(st.session_state.historico) < 10:
+        return None
+    entrada = np.array(st.session_state.historico[-19:]).reshape((1, 19, 1))
+    pred = st.session_state.modelo.predict(entrada, verbose=0)
+    pred_num = int(np.round(pred[0, 0]))
+    # Ajustar para intervalo válido da roleta (0-36)
+    if pred_num < 0:
+        pred_num = 0
+    if pred_num > 36:
+        pred_num = 36
+    return pred_num
+
+# Layout melhorado com cores
 st.markdown(
     """
     <style>
-    /* Fundo claro e fonte agradável */
-    .main {
-        background-color: #f9fafb;
-        color: #1a202c;
+    .stApp {
+        background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
+        color: #333333;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
-    .stTextInput>div>div>input {
-        height: 45px;
-        font-size: 18px;
-        border-radius: 8px;
-        border: 1.5px solid #ddd;
-        padding-left: 15px;
-    }
-    .stButton>button {
-        background-color: #0072f5;
-        color: white;
+    .titulo {
+        font-size: 3rem;
         font-weight: bold;
-        height: 45px;
-        border-radius: 8px;
-        border: none;
-        width: 100%;
-        transition: background-color 0.3s ease;
+        text-align: center;
+        margin-bottom: 1rem;
+        color: #ffffff;
+        text-shadow: 2px 2px 4px #6a3e1a;
     }
-    .stButton>button:hover {
-        background-color: #005bb5;
-        cursor: pointer;
+    .input-area {
+        max-width: 300px;
+        margin: 0 auto 1rem auto;
     }
-    .sidebar .sidebar-content {
-        background-color: #e1e7f5;
-        padding: 20px;
+    .historico {
+        max-width: 500px;
+        margin: 0 auto;
+        background-color: #ffffffaa;
+        padding: 1rem;
         border-radius: 10px;
     }
     </style>
     """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
 
-# --- Funções e variáveis globais ---
+st.markdown('<div class="titulo">Roleta Preditiva</div>', unsafe_allow_html=True)
 
-# Lista de números inseridos pelo usuário (inicial vazia)
-if 'historico' not in st.session_state:
-    st.session_state.historico = []
-
-# Modelo LSTM simples (exemplo)
-def criar_modelo():
-    model = Sequential()
-    model.add(LSTM(32, input_shape=(5, 1), return_sequences=False))
-    model.add(Dense(37, activation='softmax'))  # Roleta tem 0-36 = 37 números
-    model.compile(optimizer=Adam(learning_rate=0.01), loss='sparse_categorical_crossentropy')
-    return model
-
-if 'modelo' not in st.session_state:
-    st.session_state.modelo = criar_modelo()
-
-# Função para preparar dados (sequência para input LSTM)
-def preparar_dados(historico):
-    if len(historico) < 6:
-        return None, None
-    X, y = [], []
-    for i in range(len(historico) - 5):
-        seq_in = historico[i:i+5]
-        seq_out = historico[i+5]
-        X.append(seq_in)
-        y.append(seq_out)
-    X = np.array(X).reshape(-1, 5, 1) / 36  # Normaliza
-    y = np.array(y)
-    return X, y
-
-# Treina o modelo com histórico atual
-def treinar_modelo():
-    X, y = preparar_dados(st.session_state.historico)
-    if X is not None:
-        st.session_state.modelo.fit(X, y, epochs=15, verbose=0)
-
-# Faz a previsão dos próximos 5 números mais prováveis
-def prever_proximos():
-    if len(st.session_state.historico) < 5:
-        return [], []
-    seq_input = np.array(st.session_state.historico[-5:]).reshape(1, 5, 1) / 36
-    preds = st.session_state.modelo.predict(seq_input, verbose=0)[0]
-    top5_idx = preds.argsort()[-5:][::-1]
-    top5_probs = preds[top5_idx]
-    return top5_idx, top5_probs
-
-# --- Layout da aplicação ---
-
-st.title("🎰 Roleta Preditiva Inteligente")
-
-col1, col2 = st.columns([2,1])
-
-with col1:
-    st.markdown("## Insira o número sorteado na roleta (0 a 36)")
+with st.form(key='input_form', clear_on_submit=False):
+    input_valor = "" if st.session_state.limpar_input else st.session_state.input_numero
     numero_input = st.text_input(
-        "Número sorteado:",
+        "Digite o número sorteado (0-36):",
         key="input_numero",
+        value=input_valor,
         max_chars=2,
         placeholder="Exemplo: 17",
-        label_visibility="collapsed",
+        label_visibility="visible"
     )
+    submit_btn = st.form_submit_button("Registrar")
 
-    # Botão para adicionar o número
-    if st.button("Adicionar número") or (st.session_state.get("input_numero") and st.session_state.get("input_numero") != ''):
-        try:
-            numero = int(numero_input)
-            if 0 <= numero <= 36:
-                st.session_state.historico.append(numero)
-                treinar_modelo()
-                st.session_state.input_numero = ""  # limpa input
-                st.experimental_rerun()  # para dar foco e atualizar interface
-            else:
-                st.error("Número inválido! Insira um número entre 0 e 36.")
-        except ValueError:
-            st.error("Entrada inválida! Digite apenas números entre 0 e 36.")
+if submit_btn:
+    try:
+        numero = int(numero_input)
+        if 0 <= numero <= 36:
+            st.session_state.historico.append(numero)
+            treinar_modelo()
+            st.session_state.limpar_input = True
+            st.experimental_rerun()
+        else:
+            st.error("Número inválido! Insira um número entre 0 e 36.")
+    except ValueError:
+        st.error("Por favor, insira um número válido.")
 
-    st.markdown("---")
-    st.markdown("## Previsão dos próximos números mais prováveis")
-    top5, probs = prever_proximos()
-    if top5 != []:
-        for num, prob in zip(top5, probs):
-            st.write(f"**Número {num}** com probabilidade {prob:.2%}")
+# Mostrar histórico
+st.markdown('<div class="historico">', unsafe_allow_html=True)
+st.subheader("Histórico dos números inseridos")
+if len(st.session_state.historico) == 0:
+    st.write("Nenhum número inserido ainda.")
+else:
+    st.write(st.session_state.historico)
+st.markdown('</div>', unsafe_allow_html=True)
 
-with col2:
-    st.markdown("## Histórico de números sorteados")
-    if len(st.session_state.historico) == 0:
-        st.info("Nenhum número inserido ainda.")
-    else:
-        hist_df = pd.DataFrame(st.session_state.historico, columns=["Número"])
-        st.dataframe(hist_df, height=300)
-
-    st.markdown("---")
-    st.markdown("## Frequência dos números")
-    if len(st.session_state.historico) > 0:
-        freq = pd.Series(st.session_state.historico).value_counts().sort_index()
-        freq_df = pd.DataFrame({'Número': freq.index, 'Frequência': freq.values})
-        fig = px.bar(freq_df, x='Número', y='Frequência', title="Números mais frequentes", 
-                     labels={"Número": "Número", "Frequência": "Quantidade"})
-        st.plotly_chart(fig, use_container_width=True)
-
-# --- Finalização ---
-st.markdown("---")
-st.markdown("Desenvolvido para uso pessoal e aprendizado, com inteligência LSTM simples.")
+# Mostrar previsão
+proximo = prever_proximo()
+if proximo is not None:
+    st.success(f"Próximo número previsto pela IA: **{proximo}**")
+else:
+    st.info("Insira pelo menos 10 números para começar a prever.")
 
