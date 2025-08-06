@@ -1,5 +1,6 @@
 streamlit
+plotly
 tensorflow
-pandas
 numpy
+pandas
 scikit-learn
