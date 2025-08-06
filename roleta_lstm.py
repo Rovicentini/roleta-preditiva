@@ -33,8 +33,8 @@ st.markdown("""
         border-radius: 16px;
         border: 1px solid rgba(255, 255, 255, 0.1);
         padding: 20px;
-        box-shadow: 0 0 20px rgba(0, 255, 198, 0.2);
         margin-bottom: 20px;
+        box-shadow: 0 0 20px rgba(0, 255, 198, 0.2);
     }
 
     /* Inputs e botões futuristas */
@@ -43,7 +43,7 @@ st.markdown("""
         color: #fff;
         border: 1px solid rgba(255,255,255,0.2);
         border-radius: 12px;
-        font-size: 20px;
+        font-size: 18px;
         text-align: center;
     }
     .stButton>button {
@@ -51,8 +51,8 @@ st.markdown("""
         color: #000;
         font-weight: bold;
         border-radius: 12px;
-        padding: 12px 24px;
-        font-size: 18px;
+        padding: 10px 22px;
+        font-size: 16px;
         transition: 0.2s;
         box-shadow: 0 0 12px rgba(0,255,198,0.5);
     }
@@ -61,10 +61,9 @@ st.markdown("""
     /* Histórico em bolhas neon */
     .historico-bolhas { display: flex; flex-wrap: wrap; gap: 8px; }
     .bolha {
-        width: 52px; height: 52px; border-radius: 50%;
+        width: 50px; height: 50px; border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
         font-weight: bold; font-size: 18px; color: #fff;
-        box-shadow: 0 0 12px rgba(0,0,0,0.6);
         text-shadow: 0 0 6px rgba(0,0,0,0.8);
     }
     .vermelho { background: #d72638; box-shadow: 0 0 12px rgba(255,0,0,0.6); }
@@ -137,32 +136,53 @@ def inserir_numero():
                 st.session_state.contador_treinamento = 0
     st.session_state.input = ""
 
+def inserir_em_massa():
+    texto = st.session_state.massa.strip().replace(",", " ").replace(";", " ")
+    numeros = [n for n in texto.split() if n.isdigit()]
+    for n in numeros:
+        n = int(n)
+        if 0 <= n <= 36:
+            st.session_state.historico.append(n)
+    st.session_state.massa = ""
+    if len(st.session_state.historico) >= 20:
+        st.session_state.modelo = treinar_modelo()
+
 # ==============================
 # UI Principal
 # ==============================
 st.markdown("<h1 style='text-align:center;'>🎰 Roleta Preditiva Inteligente</h1>", unsafe_allow_html=True)
 
-col1, col2 = st.columns([2,1])
+col_input, col_hist, col_prev = st.columns([1.5, 2, 1])
 
-with col1:
+# 🔢 BLOCO DE INSERÇÃO
+with col_input:
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.subheader("➕ Inserir Número")
+    st.subheader("➕ Inserir Número Único")
     st.text_input("Digite um número (0 a 36):", key="input", on_change=inserir_numero)
+
+    st.subheader("📥 Inserir em Massa")
+    st.text_area("Cole vários números separados por espaço, vírgula ou ponto e vírgula:", key="massa")
+    st.button("Adicionar Números em Massa", on_click=inserir_em_massa)
     st.markdown("</div>", unsafe_allow_html=True)
 
+# 📜 BLOCO HISTÓRICO
+with col_hist:
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.subheader("📜 Histórico (Últimos 30)")
     if st.session_state.historico:
-        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.subheader("📜 Histórico (Últimos 30)")
         bolhas = "<div class='historico-bolhas'>"
         for num in reversed(st.session_state.historico[-30:]):
             bolhas += f"<div class='bolha {cor_roleta(num)}'>{num}</div>"
         bolhas += "</div>"
         st.markdown(bolhas, unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.info("Nenhum número inserido ainda.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-with col2:
+# 🔮 BLOCO PREVISÃO
+with col_prev:
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.subheader("🔮 Previsão")
+    st.subheader("🔮 Próxima Previsão")
     prox = prever_proximo()
     if prox is not None:
         st.markdown(f"<div class='prediction-box'>🎯 {prox}</div>", unsafe_allow_html=True)
