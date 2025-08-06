@@ -2,14 +2,12 @@ import streamlit as st
 import numpy as np
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
-import plotly.express as px
 
 # ==============================
-# 🎨 Layout Moderno e Rápido
+# 🎨 Layout Moderno
 # ==============================
 st.set_page_config(page_title="Roleta Preditiva", page_icon="🎰", layout="wide")
 
-# CSS Moderno com cores vibrantes
 st.markdown("""
     <style>
     body {
@@ -27,11 +25,6 @@ st.markdown("""
         border-radius: 10px;
         font-size: 22px;
         text-align: center;
-        transition: all 0.2s ease-in-out;
-    }
-    .stTextInput input:focus {
-        border: 2px solid #2cffd0;
-        outline: none;
     }
     .stButton>button {
         background: linear-gradient(90deg, #00ffc6, #00b894);
@@ -40,10 +33,6 @@ st.markdown("""
         border-radius: 10px;
         padding: 10px 20px;
         font-size: 18px;
-        transition: transform 0.2s ease;
-    }
-    .stButton>button:hover {
-        transform: scale(1.05);
     }
     .prediction-box {
         text-align: center;
@@ -66,6 +55,8 @@ if "historico" not in st.session_state:
     st.session_state.historico = []
 if "modelo" not in st.session_state:
     st.session_state.modelo = None
+if "contador_treinamento" not in st.session_state:
+    st.session_state.contador_treinamento = 0
 
 # ==============================
 # 🧠 Função de Treinamento
@@ -83,7 +74,7 @@ def treinar_modelo():
     modelo.add(LSTM(50, activation='relu', input_shape=(19, 1)))
     modelo.add(Dense(1))
     modelo.compile(optimizer='adam', loss='mse')
-    modelo.fit(X, y, epochs=50, verbose=0)
+    modelo.fit(X, y, epochs=20, verbose=0)  # 🔥 Menos épocas = mais rápido
     return modelo
 
 # ==============================
@@ -104,7 +95,7 @@ def prever_proximo():
     return int(np.clip(np.round(pred[0, 0]), 0, 36))
 
 # ==============================
-# ➕ Adicionar Número (Instantâneo)
+# ➕ Adicionar Número (Rápido)
 # ==============================
 def adicionar_numero():
     numero_str = st.session_state.input_numero.strip()
@@ -112,15 +103,20 @@ def adicionar_numero():
         numero = int(numero_str)
         if 0 <= numero <= 36:
             st.session_state.historico.append(numero)
-            if len(st.session_state.historico) >= 20:
+            st.session_state.contador_treinamento += 1
+
+            # Só treina a cada 5 inserções (reduz lag)
+            if len(st.session_state.historico) >= 20 and st.session_state.contador_treinamento >= 5:
                 st.session_state.modelo = treinar_modelo()
-    st.session_state.input_numero = ""  # Limpa imediatamente
+                st.session_state.contador_treinamento = 0
+
+    st.session_state.input_numero = ""  # Limpa instantaneamente
 
 # ==============================
 # 🖥️ Interface
 # ==============================
 st.title("🎰 Roleta Preditiva Inteligente")
-st.markdown("Insira os números da roleta e obtenha previsões com inteligência adaptativa!")
+st.markdown("Insira os números e veja as previsões!")
 
 col1, col2 = st.columns([2, 1])
 
@@ -139,17 +135,3 @@ with col2:
         st.markdown(f"<div class='prediction-box'>🎯 {proximo}</div>", unsafe_allow_html=True)
     else:
         st.info("Insira pelo menos 10 números para iniciar as previsões.")
-
-# ==============================
-# 📊 Gráfico Dinâmico
-# ==============================
-if st.session_state.historico:
-    fig = px.line(y=st.session_state.historico, markers=True, title="Histórico dos Últimos Números")
-    fig.update_layout(
-        plot_bgcolor="#10121b",
-        paper_bgcolor="#10121b",
-        font=dict(color="#00ffc6"),
-        xaxis=dict(showgrid=False),
-        yaxis=dict(showgrid=False)
-    )
-    st.plotly_chart(fig, use_container_width=True)
