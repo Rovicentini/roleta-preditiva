@@ -1,228 +1,177 @@
 import streamlit as st
 import numpy as np
-import time
+import plotly.express as px
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 
-st.set_page_config(page_title="Roleta Preditiva", page_icon="🎰", layout="wide")
+# =============================
+# CONFIGURAÇÃO DE ESTILO MODERNO
+# =============================
+st.set_page_config(page_title="Roleta Preditiva", layout="wide")
 
-# ==============================
-# 🌌 Estilo Lovable Futurista
-# ==============================
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap');
-    * { font-family: 'Space Grotesk', sans-serif; }
-
-    body {
-        background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-        background-size: 400% 400%;
-        animation: gradientMove 12s ease infinite;
-        color: #fff;
-    }
-    @keyframes gradientMove {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
-
-    /* Cartões estilo vidro */
-    .glass-card {
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(12px);
-        border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        padding: 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 0 20px rgba(0, 255, 198, 0.2);
-    }
-
-    /* Inputs e botões futuristas */
-    .stTextInput input, .stTextArea textarea {
-        background: rgba(255,255,255,0.07);
-        color: #fff;
-        border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 12px;
-        font-size: 18px;
-        text-align: center;
-    }
-    .stButton>button {
-        background: linear-gradient(90deg, #00ffc6, #00b8ff);
-        color: #000;
-        font-weight: bold;
-        border-radius: 12px;
-        padding: 10px 22px;
-        font-size: 16px;
-        transition: 0.2s;
-        box-shadow: 0 0 12px rgba(0,255,198,0.5);
-    }
-    .stButton>button:hover { transform: scale(1.05); }
-
-    /* Histórico em bolhas neon */
-    .historico-bolhas { display: flex; flex-wrap: wrap; gap: 8px; }
-    .bolha {
-        width: 50px; height: 50px; border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        font-weight: bold; font-size: 18px; color: #fff;
-        text-shadow: 0 0 6px rgba(0,0,0,0.8);
-    }
-    .vermelho { background: #d72638; box-shadow: 0 0 12px rgba(255,0,0,0.6); }
-    .preto { background: #1e1e1e; box-shadow: 0 0 12px rgba(255,255,255,0.3); }
-    .verde { background: #21c55d; box-shadow: 0 0 12px rgba(0,255,0,0.6); }
-
-    /* Caixa de previsão */
-    .prediction-box {
-        font-size: 48px; font-weight: bold; text-align: center;
-        color: #00ffc6; padding: 20px;
-        background: rgba(0,255,198,0.05);
-        border: 2px solid rgba(0,255,198,0.3);
-        border-radius: 16px;
-        animation: pulse 2s infinite;
-        box-shadow: 0 0 25px rgba(0,255,198,0.4);
-    }
-    @keyframes pulse {
-        0% { box-shadow: 0 0 10px rgba(0,255,198,0.2); }
-        50% { box-shadow: 0 0 25px rgba(0,255,198,0.7); }
-        100% { box-shadow: 0 0 10px rgba(0,255,198,0.2); }
-    }
-
-    /* Animação da roleta */
-    .roulette-wheel {
-        width: 180px;
-        height: 180px;
-        margin: auto;
-        border: 10px solid rgba(255,255,255,0.2);
-        border-radius: 50%;
-        background: conic-gradient(#d72638 0deg 9.7deg, #1e1e1e 9.7deg 19.4deg, 
-                                  #d72638 19.4deg 29.1deg, #1e1e1e 29.1deg 38.8deg,
-                                  #d72638 38.8deg 48.5deg, #1e1e1e 48.5deg 58.2deg,
-                                  #21c55d 58.2deg 68deg, #d72638 68deg 77.7deg,
-                                  #1e1e1e 77.7deg 87.4deg, #d72638 87.4deg 97.1deg,
-                                  #1e1e1e 97.1deg 106.8deg, #d72638 106.8deg 116.5deg,
-                                  #1e1e1e 116.5deg 126.2deg, #d72638 126.2deg 135.9deg,
-                                  #1e1e1e 135.9deg 145.6deg, #d72638 145.6deg 155.3deg,
-                                  #1e1e1e 155.3deg 165deg, #d72638 165deg 174.7deg,
-                                  #1e1e1e 174.7deg 184.4deg, #d72638 184.4deg 194.1deg,
-                                  #1e1e1e 194.1deg 203.8deg, #d72638 203.8deg 213.5deg,
-                                  #1e1e1e 213.5deg 223.2deg, #d72638 223.2deg 232.9deg,
-                                  #1e1e1e 232.9deg 242.6deg, #d72638 242.6deg 252.3deg,
-                                  #1e1e1e 252.3deg 262deg, #d72638 262deg 271.7deg,
-                                  #1e1e1e 271.7deg 281.4deg, #d72638 281.4deg 291.1deg,
-                                  #1e1e1e 291.1deg 300.8deg, #d72638 300.8deg 310.5deg,
-                                  #1e1e1e 310.5deg 320.2deg, #d72638 320.2deg 329.9deg,
-                                  #1e1e1e 329.9deg 339.6deg, #d72638 339.6deg 349.3deg,
-                                  #1e1e1e 349.3deg 360deg);
-        animation: spin 1s linear infinite;
-        box-shadow: 0 0 25px rgba(255,255,255,0.3);
-    }
-    @keyframes spin { 100% { transform: rotate(360deg); } }
+        body {
+            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+            color: #fff;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .stApp {
+            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+        }
+        .title {
+            font-size: 38px;
+            font-weight: bold;
+            text-align: center;
+            color: #ffffff;
+            margin-bottom: 10px;
+        }
+        .prediction-box {
+            background: rgba(255,255,255,0.08);
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .prediction-number {
+            font-size: 60px;
+            font-weight: bold;
+            color: #4fff9f;
+        }
+        .neighbors {
+            font-size: 20px;
+            color: #ffd166;
+        }
+        .confidence {
+            font-size: 18px;
+            color: #06d6a0;
+            margin-top: 10px;
+        }
+        .history {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .ball {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+            color: white;
+        }
+        .ball-red { background: #d90429; }
+        .ball-black { background: #222; }
+        .ball-green { background: #1b9c85; }
+        .block {
+            background: rgba(255,255,255,0.05);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
     </style>
 """, unsafe_allow_html=True)
 
-# ==============================
-# Estado e Funções
-# ==============================
-if "historico" not in st.session_state: st.session_state.historico = []
-if "modelo" not in st.session_state: st.session_state.modelo = None
-if "contador_treinamento" not in st.session_state: st.session_state.contador_treinamento = 0
+# =============================
+# FUNÇÕES PRINCIPAIS
+# =============================
 
-def cor_roleta(num):
-    vermelhos = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
-    pretos = {2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35}
-    return "verde" if num==0 else "vermelho" if num in vermelhos else "preto"
-
-def treinar_modelo():
-    dados = np.array(st.session_state.historico)
-    X, y = [], []
-    for i in range(len(dados)-19):
-        X.append(dados[i:i+19])
-        y.append(dados[i+19])
-    X, y = np.array(X), np.array(y)
-    X = X.reshape((X.shape[0], X.shape[1], 1))
-    modelo = Sequential()
-    modelo.add(LSTM(50, activation='relu', input_shape=(19, 1)))
-    modelo.add(Dense(1))
-    modelo.compile(optimizer='adam', loss='mse')
-    modelo.fit(X, y, epochs=20, verbose=0)
-    return modelo
+def criar_modelo():
+    model = Sequential([
+        LSTM(32, input_shape=(19, 1)),
+        Dense(1, activation='linear')
+    ])
+    model.compile(optimizer='adam', loss='mse')
+    return model
 
 def prever_proximo():
-    if st.session_state.modelo is None or len(st.session_state.historico) < 10:
-        return None
-    janela = min(19, len(st.session_state.historico))
-    entrada = np.array(st.session_state.historico[-janela:]).reshape((1, janela, 1))
-    if janela < 19:
-        entrada = np.concatenate([np.zeros((1, 19-janela, 1)), entrada], axis=1)
+    if len(st.session_state.historico) < 19:
+        return None, [], "Aguardando mais dados"
+    
+    # Prepara dados
+    entrada = np.array(st.session_state.historico[-19:]).reshape((1, 19, 1))
     pred = st.session_state.modelo.predict(entrada, verbose=0)
-    return int(np.clip(np.round(pred[0, 0]), 0, 36))
+    numero_previsto = int(np.round(pred[0][0])) % 37
 
-def inserir_numero():
-    if st.session_state.input.strip().isdigit():
-        n = int(st.session_state.input.strip())
-        if 0 <= n <= 36:
-            st.session_state.historico.append(n)
-            st.session_state.contador_treinamento += 1
-            if len(st.session_state.historico) >= 20 and st.session_state.contador_treinamento >= 5:
-                st.session_state.modelo = treinar_modelo()
-                st.session_state.contador_treinamento = 0
-    st.session_state.input = ""
+    # Ajuste com padrões históricos
+    frequencia = {n: st.session_state.historico.count(n) for n in set(st.session_state.historico)}
+    if numero_previsto in frequencia and frequencia[numero_previsto] > 3:
+        numero_previsto = (numero_previsto + 5) % 37
 
-def inserir_em_massa():
-    texto = st.session_state.massa.strip().replace(",", " ").replace(";", " ")
-    numeros = [n for n in texto.split() if n.isdigit()]
-    for n in numeros:
-        n = int(n)
-        if 0 <= n <= 36:
-            st.session_state.historico.append(n)
-    st.session_state.massa = ""
-    if len(st.session_state.historico) >= 20:
-        st.session_state.modelo = treinar_modelo()
+    # Definir vizinhos dinamicamente
+    ultimos = st.session_state.historico[-10:]
+    dispersao = len(set(ultimos))
+    vizinhos = 1 if dispersao > 7 else 2 if dispersao > 4 else 3
 
-# ==============================
-# UI Principal
-# ==============================
-st.markdown("<h1 style='text-align:center;'>🎰 Roleta Preditiva Inteligente</h1>", unsafe_allow_html=True)
+    numeros_vizinhos = [(numero_previsto + i) % 37 for i in range(-vizinhos, vizinhos+1)]
 
-col_input, col_hist, col_prev = st.columns([1.5, 2, 1])
+    # Definir confiança
+    confianca = "ALTA" if vizinhos == 1 else "MÉDIA" if vizinhos == 2 else "BAIXA"
 
-# 🔢 BLOCO DE INSERÇÃO
-with col_input:
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.subheader("➕ Inserir Número Único")
-    st.text_input("Digite um número (0 a 36):", key="input", on_change=inserir_numero)
+    return numero_previsto, numeros_vizinhos, confianca
 
-    st.subheader("📥 Inserir em Massa")
-    st.text_area("Cole vários números separados por espaço, vírgula ou ponto e vírgula:", key="massa")
-    st.button("Adicionar Números em Massa", on_click=inserir_em_massa)
-    st.markdown("</div>", unsafe_allow_html=True)
+def cor_numero(numero):
+    if numero == 0:
+        return "green"
+    vermelhos = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
+    return "red" if numero in vermelhos else "black"
 
-# 📜 BLOCO HISTÓRICO
-with col_hist:
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.subheader("📜 Histórico (Últimos 30)")
-    if st.session_state.historico:
-        bolhas = "<div class='historico-bolhas'>"
-        for num in reversed(st.session_state.historico[-30:]):
-            bolhas += f"<div class='bolha {cor_roleta(num)}'>{num}</div>"
-        bolhas += "</div>"
-        st.markdown(bolhas, unsafe_allow_html=True)
+# =============================
+# ESTADO INICIAL
+# =============================
+if "historico" not in st.session_state:
+    st.session_state.historico = []
+if "modelo" not in st.session_state:
+    st.session_state.modelo = criar_modelo()
+
+# =============================
+# LAYOUT PRINCIPAL
+# =============================
+st.markdown("<div class='title'>🎰 Roleta Preditiva Inteligente</div>", unsafe_allow_html=True)
+
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    with st.container():
+        st.markdown("<div class='block'>", unsafe_allow_html=True)
+        st.subheader("🎯 Inserir Números")
+        numero = st.number_input("Informe o número (0 a 36):", min_value=0, max_value=36, step=1, key="input_numero")
+        if st.button("Adicionar Número"):
+            st.session_state.historico.insert(0, int(numero))  # Último número à esquerda
+            if len(st.session_state.historico) > 200:
+                st.session_state.historico = st.session_state.historico[:200]
+            st.session_state.input_numero = 0
+        st.text_area("Inserir números em massa (separados por vírgula):", key="massa")
+        if st.button("Adicionar em Massa"):
+            nums = [int(x.strip()) for x in st.session_state.massa.split(",") if x.strip().isdigit()]
+            for n in nums[::-1]:  # Mantém ordem correta
+                st.session_state.historico.insert(0, n)
+            if len(st.session_state.historico) > 200:
+                st.session_state.historico = st.session_state.historico[:200]
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with st.container():
+        st.markdown("<div class='block'>", unsafe_allow_html=True)
+        st.subheader("📜 Histórico")
+        st.markdown("<div class='history'>", unsafe_allow_html=True)
+        for n in st.session_state.historico:
+            cor = cor_numero(n)
+            st.markdown(f"<div class='ball ball-{cor}'>{n}</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+with col2:
+    st.markdown("<div class='block prediction-box'>", unsafe_allow_html=True)
+    st.subheader("🔮 Predição")
+    numero_previsto, vizinhos, confianca = prever_proximo()
+    if numero_previsto is not None:
+        st.markdown(f"<div class='prediction-number'>{numero_previsto}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='neighbors'>Aposte também nos vizinhos: {', '.join(map(str, vizinhos))}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='confidence'>Confiança: {confianca}</div>", unsafe_allow_html=True)
     else:
-        st.info("Nenhum número inserido ainda.")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# 🔮 BLOCO PREVISÃO COM ROLETA
-with col_prev:
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.subheader("🔮 Próxima Previsão")
-
-    prox = prever_proximo()
-    if prox is not None:
-        placeholder = st.empty()
-        with placeholder:
-            st.markdown("<div class='roulette-wheel'></div>", unsafe_allow_html=True)
-        time.sleep(2.5)  # Tempo de rotação da roleta
-        placeholder.markdown(f"<div class='prediction-box'>🎯 {prox}</div>", unsafe_allow_html=True)
-    else:
-        st.info("Insira pelo menos 10 números para prever.")
-
+        st.info("Insira pelo menos 19 números para iniciar a predição.")
     st.markdown("</div>", unsafe_allow_html=True)
