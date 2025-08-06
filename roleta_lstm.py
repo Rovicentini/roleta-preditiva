@@ -1,11 +1,10 @@
 import streamlit as st
 import numpy as np
-import plotly.express as px
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 
 # =============================
-# CONFIGURAÇÃO DE ESTILO MODERNO (layout aprovado)
+# CONFIGURAÇÃO DE ESTILO (layout aprovado)
 # =============================
 st.set_page_config(page_title="Roleta Preditiva", layout="wide")
 
@@ -80,7 +79,6 @@ st.markdown("""
 # =============================
 # FUNÇÕES
 # =============================
-
 def criar_modelo():
     model = Sequential([
         LSTM(32, input_shape=(19, 1)),
@@ -97,12 +95,10 @@ def prever_proximo():
     pred = st.session_state.modelo.predict(entrada, verbose=0)
     numero_previsto = int(np.round(pred[0][0])) % 37
 
-    # Ajuste por padrões históricos
     frequencia = {n: st.session_state.historico.count(n) for n in set(st.session_state.historico)}
     if numero_previsto in frequencia and frequencia[numero_previsto] > 3:
         numero_previsto = (numero_previsto + 5) % 37
 
-    # Definir vizinhos dinamicamente
     ultimos = st.session_state.historico[-10:]
     dispersao = len(set(ultimos))
     vizinhos = 1 if dispersao > 7 else 2 if dispersao > 4 else 3
@@ -137,13 +133,17 @@ with col1:
     # Bloco: Inserção de Números
     st.markdown("<div class='block'>", unsafe_allow_html=True)
     st.subheader("🎯 Inserir Números")
-    numero = st.number_input("Informe o número (0 a 36):", min_value=0, max_value=36, step=1, key="input_numero")
-    if st.button("Adicionar Número"):
-        st.session_state.historico.insert(0, int(numero))  # Último número à esquerda
-        if len(st.session_state.historico) > 200:
-            st.session_state.historico = st.session_state.historico[:200]
-        st.session_state.input_numero = 0
+    numero = st.number_input("Informe o número (0 a 36) e pressione ENTER:", min_value=0, max_value=36, step=1, key="input_numero")
 
+    # Insere número automaticamente ao pressionar Enter
+    if st.session_state.input_numero not in st.session_state.historico or st.session_state.get("ultimo_inserido") != st.session_state.input_numero:
+        if st.session_state.input_numero != 0 or len(st.session_state.historico) > 0:  
+            st.session_state.historico.insert(0, int(numero))
+            st.session_state.ultimo_inserido = st.session_state.input_numero
+            if len(st.session_state.historico) > 200:
+                st.session_state.historico = st.session_state.historico[:200]
+
+    # Inserção em massa
     st.text_area("Inserir números em massa (separados por vírgula):", key="massa")
     if st.button("Adicionar em Massa"):
         nums = [int(x.strip()) for x in st.session_state.massa.split(",") if x.strip().isdigit()]
@@ -153,7 +153,7 @@ with col1:
             st.session_state.historico = st.session_state.historico[:200]
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Bloco: Histórico
+    # Bloco: Histórico (lado a lado)
     st.markdown("<div class='block'>", unsafe_allow_html=True)
     st.subheader("📜 Histórico")
     st.markdown("<div class='history'>", unsafe_allow_html=True)
