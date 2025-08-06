@@ -147,22 +147,28 @@ def treinar_modelo():
         y.append(dados[i+19])
     X, y = np.array(X), np.array(y)
     X = X.reshape((X.shape[0], X.shape[1], 1))
+    
     modelo = Sequential()
     modelo.add(LSTM(50, activation='relu', input_shape=(19, 1)))
-    modelo.add(Dense(1))
-    modelo.compile(optimizer='adam', loss='mse')
-    modelo.fit(X, y, epochs=20, verbose=0)
+    modelo.add(Dense(37, activation='softmax'))  # Saída para 37 classes (0 a 36)
+    modelo.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    modelo.fit(X, y, epochs=40, verbose=0)
     return modelo
 
-def prever_proximo():
+def prever_proximo(top_n=3):
     if st.session_state.modelo is None or len(st.session_state.historico) < 10:
         return None
     janela = min(19, len(st.session_state.historico))
     entrada = np.array(st.session_state.historico[-janela:]).reshape((1, janela, 1))
     if janela < 19:
         entrada = np.concatenate([np.zeros((1, 19-janela, 1)), entrada], axis=1)
-    pred = st.session_state.modelo.predict(entrada, verbose=0)
-    return int(np.clip(np.round(pred[0, 0]), 0, 36))
+    
+    prob = st.session_state.modelo.predict(entrada, verbose=0)[0]  # vetor de probabilidade (37,)
+    
+    top_indices = prob.argsort()[-top_n:][::-1]  # índices dos top n números com maior probabilidade
+    top_probs = prob[top_indices]
+    
+    return list(zip(top_indices, top_probs))  # lista de (numero, probabilidade)
 
 def inserir_numero():
     if st.session_state.input.strip().isdigit():
@@ -173,7 +179,7 @@ def inserir_numero():
             if len(st.session_state.historico) >= 20 and st.session_state.contador_treinamento >= 5:
                 st.session_state.modelo = treinar_modelo()
                 st.session_state.contador_treinamento = 0
-    st.session_state.input = ""  # <-- Limpa o input após ENTER
+    st.session_state.input = ""  # limpa o input após ENTER
 
 def inserir_em_massa():
     texto = st.session_state.massa.strip().replace(",", " ").replace(";", " ")
@@ -210,7 +216,6 @@ with col_hist:
     st.subheader("📜 Histórico (Últimos 30)")
     if st.session_state.historico:
         bolhas = "<div class='historico-bolhas'>"
-        # Mostra do mais recente (final da lista) para o mais antigo, mantendo horizontal
         for num in reversed(st.session_state.historico[-30:]):
             bolhas += f"<div class='bolha {cor_roleta(num)}'>{num}</div>"
         bolhas += "</div>"
@@ -224,13 +229,28 @@ with col_prev:
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
     st.subheader("🔮 Próxima Previsão")
 
-    prox = prever_proximo()
-    if prox is not None:
+    previsoes = prever_proximo()
+    if previsoes is not None:
         placeholder = st.empty()
         with placeholder:
             st.markdown("<div class='roulette-wheel'></div>", unsafe_allow_html=True)
         time.sleep(2.5)  # Tempo de rotação da roleta
-        placeholder.markdown(f"<div class='prediction-box'>🎯 {prox}</div>", unsafe_allow_html=True)
+
+        # Monta texto com os top números + probabilidades
+        previsoes_texto = "<div style='text-align:center;'>"
+        for num, prob in previsoes:
+            cor = cor_roleta(num)
+            color_bg = "#21c55d" if cor == "verde" else "#d72638" if cor == "vermelho" else "#1e1e1e"
+            previsoes_texto += (
+                f"<span style='font-size:28px; font-weight:bold; color:#00ffc6; margin:8px;'>"
+                f"<span style='color:#fff; text-shadow:0 0 6px rgba(0,0,0,0.8); "
+                f"background-color:{color_bg}; border-radius:50%; padding:10px 16px; display:inline-block;'>"
+                f"{num}</span>"
+                f" <small style='font-weight:normal; color:#0ff;'>{prob*100:.1f}%</small></span>&nbsp;&nbsp;"
+            )
+        previsoes_texto += "</div>"
+
+        placeholder.markdown(previsoes_texto, unsafe_allow_html=True)
     else:
         st.info("Insira pelo menos 10 números para prever.")
 
