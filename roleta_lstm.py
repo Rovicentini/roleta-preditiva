@@ -72,19 +72,7 @@ if 'modelo_treinado' not in st.session_state:
 
 
 
-# --- VARIÁVEIS GLOBAIS ---
-NUM_TOTAL = 37  # Números da Roleta Europeia: 0 a 36
-SEQUENCIA_ENTRADA = 10  # Quantos números analisar por entrada
 
-if 'historico' not in st.session_state:
-    st.session_state.historico = []
-
-if 'resultados' not in st.session_state:
-    st.session_state.resultados = []
-
-
-if 'modelo_treinado' not in st.session_state:
-    st.session_state.modelo_treinado = False
 
 # --- FUNÇÕES AUXILIARES ---
 
@@ -147,7 +135,7 @@ def treinar_modelo():
     return model, scaler
 
 
-  def prever_proximo(modelo, scaler):
+def prever_proximo(modelo, scaler):
     if not modelo:
         return []
     ultimos = st.session_state.historico[-SEQUENCIA_ENTRADA:]
@@ -232,6 +220,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
