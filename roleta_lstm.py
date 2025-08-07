@@ -1,133 +1,94 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
-from collections import defaultdict, deque
+import pandas as pd
+import plotly.graph_objects as go
 import matplotlib.pyplot as plt
-from keras.models import Sequential
-from keras.layers import LSTM, Dense
 from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+import os
 
-st.set_page_config(layout="wide")
-st.title("🔮 Previsor de Roleta Inteligente")
+# Inicializar variáveis na sessão
+if "resultados" not in st.session_state:
+    st.session_state.resultados = []
+if "acertos" not in st.session_state:
+    st.session_state.acertos = []
+if "perdas" not in st.session_state:
+    st.session_state.perdas = []
 
-st.sidebar.header("🎰 Configurações")
-num_vizinhos = st.sidebar.slider("Quantidade de vizinhos (cada lado):", 0, 5, 2)
-total_vizinhos = num_vizinhos * 2 + 1
+st.title("IA Preditiva para Roleta - Análise Probabilística")
 
-numero_roleta = [26, 3, 35, 12, 28, 7, 29, 18, 22, 9, 31, 14,
-                 20, 1, 33, 16, 24, 5, 10, 23, 8, 30, 11, 36,
-                 13, 27, 6, 34, 17, 25, 2, 21, 4, 19, 15, 32, 0]
+# Inserção de novo número
+with st.form(key="formulario"):
+    novo_resultado = st.number_input("Insira o novo número sorteado (0 a 36):", min_value=0, max_value=36, step=1, key="input")
+    submit_button = st.form_submit_button(label="Registrar")
 
-historico = st.session_state.get("historico", [])
-resultados = st.session_state.get("resultados", [])
-acertos_erros = st.session_state.get("acertos_erros", [])
+if submit_button:
+    st.session_state.resultados.append(novo_resultado)
+    st.session_state.input = 0  # Limpa o campo de entrada
+    st.experimental_rerun()
 
-novo_numero = st.text_input("Digite o número sorteado:", key="input_numero")
+# Visualizar resultados
+st.subheader("Histórico de Resultados")
+st.write(st.session_state.resultados)
 
-# Lógica de vizinhos
-def get_vizinhos(numero, vizinhos=2):
-    if numero not in numero_roleta:
-        return []
-    idx = numero_roleta.index(numero)
-    indices = [(idx + i) % len(numero_roleta) for i in range(-vizinhos, vizinhos + 1)]
-    return [numero_roleta[i] for i in indices]
+# Função para gerar dados para o modelo
+WINDOW_SIZE = 5
 
-# Inicialização de rede neural
-scaler = MinMaxScaler(feature_range=(0, 1))
-model = st.session_state.get("model")
-X_buffer = st.session_state.get("X_buffer", deque(maxlen=1000))
-y_buffer = st.session_state.get("y_buffer", deque(maxlen=1000))
+def preparar_dados(resultados):
+    scaler = MinMaxScaler()
+    resultados_np = np.array(resultados).reshape(-1, 1)
+    resultados_normalizados = scaler.fit_transform(resultados_np)
 
-if model is None:
+    X, y = [], []
+    for i in range(WINDOW_SIZE, len(resultados_normalizados)):
+        X.append(resultados_normalizados[i-WINDOW_SIZE:i, 0])
+        y.append(resultados_normalizados[i, 0])
+    return np.array(X), np.array(y), scaler
+
+# Treinar modelo se houver dados suficientes
+if len(st.session_state.resultados) > WINDOW_SIZE + 1:
+    X, y, scaler = preparar_dados(st.session_state.resultados)
+    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+
     model = Sequential()
-    model.add(LSTM(64, input_shape=(20, 1)))
-    model.add(Dense(1))
-    model.compile(loss='mean_squared_error', optimizer='adam')
-    st.session_state.model = model
+    model.add(LSTM(units=50, return_sequences=True, input_shape=(X.shape[1], 1)))
+    model.add(LSTM(units=50))
+    model.add(Dense(units=1))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    model.fit(X, y, epochs=10, batch_size=1, verbose=0)
 
-# Entrada do usuário
-if st.button("Adicionar Número") and novo_numero != "":
-    try:
-        numero = int(novo_numero)
-        if numero not in numero_roleta:
-            st.warning("Número inválido. Digite um número de 0 a 36.")
+    ultimos_resultados = st.session_state.resultados[-WINDOW_SIZE:]
+    entrada = scaler.transform(np.array(ultimos_resultados).reshape(-1, 1)).reshape(1, WINDOW_SIZE, 1)
+    previsao_normalizada = model.predict(entrada)
+    previsao = scaler.inverse_transform(previsao_normalizada)[0][0]
+
+    numero_previsto = int(round(previsao)) % 37
+
+    # Vizinhança para avaliar acerto
+    vizinhos = 1  # Pode aumentar para 2 ou 3
+    numeros_vizinhos = [(numero_previsto + i) % 37 for i in range(-vizinhos, vizinhos+1)]
+
+    st.subheader("Previsão da IA")
+    st.write(f"Próximo número previsto: **{numero_previsto}**")
+    st.write(f"Considerando vizinhos: {numeros_vizinhos}")
+
+    if len(st.session_state.resultados) > WINDOW_SIZE + 2:
+        ultimo_real = st.session_state.resultados[-1]
+        if ultimo_real in numeros_vizinhos:
+            st.session_state.acertos.append(1)
+            st.session_state.perdas.append(0)
+            st.success("Acerto!")
         else:
-            historico.append(numero)
-            st.session_state.historico = historico
+            st.session_state.acertos.append(0)
+            st.session_state.perdas.append(1)
+            st.error("Erro na previsão")
 
-            # Previsão com LSTM
-            if len(historico) >= 21:
-                dados = np.array(historico[-21:]).reshape(-1, 1)
-                dados = scaler.fit_transform(dados)
-                X = dados[:-1].reshape(1, 20, 1)
-                y = dados[-1].reshape(1, 1)
-
-                # Atualiza o buffer
-                X_buffer.append(X[0])
-                y_buffer.append(y[0])
-
-                # Treina o modelo continuamente
-                if len(X_buffer) >= 20:
-                    X_train = np.array(X_buffer)
-                    y_train = np.array(y_buffer)
-                    model.fit(X_train, y_train, epochs=1, batch_size=4, verbose=0)
-
-                pred_scaled = model.predict(X, verbose=0)
-                pred = scaler.inverse_transform(pred_scaled)[0][0]
-                pred_mais_proximo = min(numero_roleta, key=lambda x: abs(x - pred))
-                vizinhos = get_vizinhos(pred_mais_proximo, num_vizinhos)
-                resultados.append({"previsto": pred_mais_proximo, "vizinhos": vizinhos, "real": numero})
-                st.session_state.resultados = resultados
-
-                # Avaliação do acerto
-                acerto = int(numero in vizinhos)
-                acertos_erros.append(acerto)
-                st.session_state.acertos_erros = acertos_erros
-
-    except ValueError:
-        st.warning("Digite um número válido inteiro.")
-
-# Exibição do histórico
-st.subheader("📜 Histórico de Números")
-st.write(historico[::-1])
-
-# Última previsão
-if resultados:
-    st.subheader("🎯 Última Previsão da IA")
-    ultima = resultados[-1]
-    st.markdown(f"**Número Previsto:** {ultima['previsto']}")
-    st.markdown(f"**Vizinhos Considerados ({num_vizinhos} de cada lado):** {ultima['vizinhos']}")
-    st.markdown(f"**Número Real Sorteado:** {ultima['real']}")
-
-# Visualização de desempenho
-if acertos_erros:
-    st.subheader("📊 Desempenho da IA")
-    acertos = sum(acertos_erros)
-    total = len(acertos_erros)
-    taxa_acerto = (acertos / total) * 100
-    st.markdown(f"**Taxa de Acerto:** {taxa_acerto:.2f}% ({acertos}/{total})")
-
-    fig, ax = plt.subplots()
-    ax.plot(acertos_erros, marker='o', linestyle='-', label="Acerto (1) / Erro (0)")
-    ax.set_title("Evolução dos Acertos por Rodada")
-    ax.set_xlabel("Rodada")
-    ax.set_ylabel("Resultado")
-    st.pyplot(fig)
-
-    # Tabela detalhada
-    st.markdown("### 📋 Detalhes por Rodada")
-    df = pd.DataFrame(resultados)
-    df['Acertou'] = ["✅" if x else "❌" for x in acertos_erros]
-    st.dataframe(df[::-1], use_container_width=True)
-
-# Probabilidade por número
-if historico:
-    st.subheader("📈 Análise Probabilística (Frequência dos Últimos 100)")
-    df_freq = pd.DataFrame(historico[-100:], columns=["Número"])
-    freq = df_freq.value_counts().reset_index()
-    freq.columns = ["Número", "Frequência"]
-    st.bar_chart(freq.set_index("Número"))
-
-    mais_frequentes = freq.head(5)
-    st.markdown("**Top 5 Números Mais Frequentes:**")
-    st.write(mais_frequentes)
+    # Gráfico de desempenho
+    st.subheader("Desempenho da IA")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(y=np.cumsum(st.session_state.acertos), mode='lines', name='Acertos'))
+    fig.add_trace(go.Scatter(y=np.cumsum(st.session_state.perdas), mode='lines', name='Erros'))
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.warning("Insira pelo menos 6 números para iniciar as previsões.")
