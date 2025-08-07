@@ -135,7 +135,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     st.subheader("📈 Sugestão de Apostas da IA")
     st.write("**Sugestão de números:**", sugestoes)
 
-    # Comparar com último número
+    # Avaliar acerto
     if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
         ultimo_real = st.session_state.historico[-1]
         acerto = ultimo_real in sugestoes
@@ -147,7 +147,8 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
         st.write(f"**Último número real:** {ultimo_real} | **Acertou?** {'✅' if acerto else '❌'}")
         acertos, erros = calcular_performance()
-st.sidebar.markdown(f"✅ Acertos: {acertos} | ❌ Erros: {erros} | Total: {acertos + erros}")
+        st.sidebar.markdown(f"✅ Acertos: {acertos} | ❌ Erros: {erros} | Total: {acertos + erros}")
+
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
 
