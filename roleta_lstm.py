@@ -142,11 +142,6 @@ def calcular_performance():
             acertos += 1
     return acertos, total - acertos
 
-def exibir_grafico_performance():
-    acertos, erros = calcular_performance()
-    fig, ax = plt.subplots()
-    ax.bar(['Acertos', 'Erros'], [acertos, erros])
-    st.pyplot(fig)
 
 # --- SIDEBAR ---
 st.sidebar.header("🎛️ Configurações")
@@ -200,4 +195,5 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
