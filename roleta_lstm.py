@@ -225,11 +225,47 @@ else:
 
 # --- TREINAR E PREVER ---
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
-    model, scaler = treinar_modelo()
-    sugestoes = prever_proximo(model, scaler)
+    # Regressão (modelo atual)
+model_regressao, scaler = treinar_modelo()
+sugestoes_regressao = prever_proximo(model_regressao, scaler)
+
+# Classificação com LSTM + softmax
+if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
+    model_classificacao = treinar_modelo_lstm(st.session_state.historico)
+
+    # Previsão do próximo número (classificação)
+    entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
+    predicao_softmax = model_classificacao.predict(entrada, verbose=0)
+    numero_mais_provavel = int(np.argmax(predicao_softmax))
+
+    # Vizinhos da previsão (como apoio)
+    vizinhos_softmax = obter_vizinhos_roleta(numero_mais_provavel, quantidade_vizinhos=st.session_state.quantidade_vizinhos)
+    sugestoes_softmax = sorted(set([numero_mais_provavel] + vizinhos_softmax))
+else:
+    sugestoes_softmax = []
+
 
     st.subheader("📈 Sugestão de Apostas da IA")
     st.write("**Sugestão de números:**", sugestoes)
+    # Sugestões do modelo de classificação
+if sugestoes_softmax:
+    st.write("🎯 **Sugestão (Classificação LSTM):**", sugestoes_softmax)
+
+    # Avaliar acerto (usando classificação também)
+    if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
+        ultimo_real = st.session_state.historico[-1]
+        acerto = ultimo_real in sugestoes_softmax
+        st.session_state.resultados.append({
+            'real': ultimo_real,
+            'previsto': sugestoes_softmax,
+            'acerto': acerto
+        })
+
+        st.write(f"**Último número real:** {ultimo_real} | **Acertou?** {'✅' if acerto else '❌'}")
+
+        acertos, erros = calcular_performance()
+        st.sidebar.markdown(f"✅ Acertos: {acertos} | ❌ Erros: {erros} | Total: {acertos + erros}")
+
 
     # Avaliar acerto
     if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
@@ -247,6 +283,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
