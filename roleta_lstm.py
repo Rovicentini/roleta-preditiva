@@ -132,6 +132,11 @@ def calcular_vizinhos(prob):
     
     # Inverte a escala para que prob alta gere poucos vizinhos
     vizinhos = max_viz - int(prob * (max_viz - min_viz))
+    if vizinhos < min_viz:
+    vizinhos = min_viz
+elif vizinhos > max_viz:
+    vizinhos = max_viz
+return vizinhos
     return max(min_viz, vizinhos)
 
 
@@ -188,8 +193,7 @@ def prever_proximo(modelo, scaler):
 
     sugestoes = [valor]
 
-    if st.session_state.quantidade_vizinhos > 0:
-        vizinhos = obter_vizinhos_roleta(valor, quantidade_vizinhos=st.session_state.quantidade_vizinhos)
+    
         sugestoes.extend(vizinhos)
 
     sugestoes = sorted(set(sugestoes))  # Remove duplicatas e ordena
@@ -243,10 +247,10 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
     # CLASSIFICAÇÃO
    model_classificacao = treinar_modelo_lstm(st.session_state.historico)
-entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
-predicao_softmax = model_classificacao.predict(entrada, verbose=0)
-
-probs = predicao_softmax[0]
+        entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
+        predicao_softmax = model_classificacao.predict(entrada, verbose=0)
+    
+    probs = predicao_softmax[0]
 
 # Definir limite dinâmico para filtrar números importantes
 limite = np.mean(probs) + np.std(probs)
@@ -279,7 +283,8 @@ else:
         ultimo_real = st.session_state.historico[-1]
 
         # Avaliação Classificação
-        acerto_classificacao = ultimo_real in sugestoes_softmax
+      numeros_sugeridos = [num for num, _ in sugestoes_com_vizinhos]
+        acerto_classificacao = ultimo_real in numeros_sugeridos
         st.session_state.resultados.append({
             'real': ultimo_real,
             'previsto': sugestoes_softmax,
@@ -298,6 +303,7 @@ else:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
