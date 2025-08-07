@@ -224,66 +224,53 @@ else:
     st.info("Nenhum número inserido ainda.")
 
 # --- TREINAR E PREVER ---
+sugestoes_regressao = []
+sugestoes_softmax = []
+
+# Apenas se houver dados suficientes
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
-    # Regressão (modelo atual)
+    # REGRESSÃO
     model_regressao, scaler = treinar_modelo()
     sugestoes_regressao = prever_proximo(model_regressao, scaler)
 
-# Classificação com LSTM + softmax
-if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
+    # CLASSIFICAÇÃO
     model_classificacao = treinar_modelo_lstm(st.session_state.historico)
-
-    # Previsão do próximo número (classificação)
     entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
     predicao_softmax = model_classificacao.predict(entrada, verbose=0)
     numero_mais_provavel = int(np.argmax(predicao_softmax))
-
-    # Vizinhos da previsão (como apoio)
     vizinhos_softmax = obter_vizinhos_roleta(numero_mais_provavel, quantidade_vizinhos=st.session_state.quantidade_vizinhos)
     sugestoes_softmax = sorted(set([numero_mais_provavel] + vizinhos_softmax))
-else:
-    sugestoes_softmax = []
 
-
+    # --- EXIBIR SUGESTÕES ---
     st.subheader("📈 Sugestão de Apostas da IA")
-    st.write("**Sugestão de números (Regressão):**", sugestoes_regressao)
-
-    # Sugestões do modelo de classificação
-if sugestoes_softmax:
+    st.write("🔢 **Sugestão de números (Regressão):**", sugestoes_regressao)
     st.write("🎯 **Sugestão (Classificação LSTM):**", sugestoes_softmax)
 
-    # Avaliar acerto (usando classificação também)
+    # --- AVALIAÇÃO DE DESEMPENHO ---
     if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
         ultimo_real = st.session_state.historico[-1]
-        acerto = ultimo_real in sugestoes_softmax
+
+        # Avaliação Classificação
+        acerto_classificacao = ultimo_real in sugestoes_softmax
         st.session_state.resultados.append({
             'real': ultimo_real,
             'previsto': sugestoes_softmax,
-            'acerto': acerto
+            'acerto': acerto_classificacao
         })
 
-        st.write(f"**Último número real:** {ultimo_real} | **Acertou?** {'✅' if acerto else '❌'}")
+        st.write(f"🎯 **Último número real:** {ultimo_real} | **Acertou (Classificação)?** {'✅' if acerto_classificacao else '❌'}")
 
+        # Avaliação Regressão
+        acerto_regressao = ultimo_real in sugestoes_regressao
+        st.write(f"🔢 **Acertou (Regressão)?** {'✅' if acerto_regressao else '❌'}")
+
+        # Estatísticas
         acertos, erros = calcular_performance()
-        st.sidebar.markdown(f"✅ Acertos: {acertos} | ❌ Erros: {erros} | Total: {acertos + erros}")
-
-
-    # Avaliar acerto
-    if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
-        ultimo_real = st.session_state.historico[-1]
-        acerto = ultimo_real in sugestoes
-        st.session_state.resultados.append({
-            'real': ultimo_real,
-            'previsto': sugestoes,
-            'acerto': acerto
-        })
-
-        st.write(f"**Último número real:** {ultimo_real} | **Acertou?** {'✅' if acerto else '❌'}")
-        acertos, erros = calcular_performance()
-        st.sidebar.markdown(f"✅ Acertos: {acertos} | ❌ Erros: {erros} | Total: {acertos + erros}")
+        st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 
 else:
-    st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+    st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
