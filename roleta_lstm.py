@@ -25,8 +25,8 @@ if 'historico' not in st.session_state:
 if 'resultados' not in st.session_state:
     st.session_state.resultados = []
 
-if 'vizinhanca' not in st.session_state:
-    st.session_state.vizinhanca = {
+if 'vizinhanca_map' not in st.session_state:
+    st.session_state.vizinhanca_map = {
         0: [26, 32, 3],
         1: [20, 33, 14],
         2: [17, 25, 21],
@@ -151,8 +151,8 @@ def prever_proximo(modelo, scaler):
     sugestoes = [valor]
 
     if st.session_state.quantidade_vizinhos > 0:
-    vizinhos = obter_vizinhos_roleta(valor, quantidade_vizinhos=st.session_state.quantidade_vizinhos)
-    sugestoes.extend(vizinhos)
+        vizinhos = obter_vizinhos_roleta(valor, quantidade_vizinhos=st.session_state.quantidade_vizinhos)
+        sugestoes.extend(vizinhos)
 
     sugestoes = sorted(set(sugestoes))  # Remove duplicatas e ordena
 
@@ -169,9 +169,11 @@ def calcular_performance():
 
 
 # --- SIDEBAR ---
-st.sidebar.header("🎛️ Configurações")
-viz = st.sidebar.slider("Número de vizinhos (acertos)", 0, 5, st.session_state.vizinhanca)
-st.session_state.vizinhanca = viz
+if 'quantidade_vizinhos' not in st.session_state:
+    st.session_state.quantidade_vizinhos = 3  # default
+
+viz = st.sidebar.slider("Número de vizinhos (acertos)", 0, 5, st.session_state.quantidade_vizinhos)
+st.session_state.quantidade_vizinhos = viz
 
 if st.sidebar.button("🔁 Reiniciar Tudo"):
     st.session_state.historico = []
@@ -220,6 +222,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
