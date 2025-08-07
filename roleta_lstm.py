@@ -246,7 +246,8 @@ else:
 
 
     st.subheader("📈 Sugestão de Apostas da IA")
-    st.write("**Sugestão de números:**", sugestoes)
+    st.write("**Sugestão de números (Regressão):**", sugestoes_regressao)
+
     # Sugestões do modelo de classificação
 if sugestoes_softmax:
     st.write("🎯 **Sugestão (Classificação LSTM):**", sugestoes_softmax)
@@ -283,6 +284,7 @@ if sugestoes_softmax:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
