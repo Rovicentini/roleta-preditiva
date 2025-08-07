@@ -10,7 +10,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
-
+import time
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(layout="wide")
 st.title("🎯 IA Avançada para Roleta Europeia")
@@ -70,10 +70,7 @@ if 'vizinhanca' not in st.session_state:
 if 'modelo_treinado' not in st.session_state:
     st.session_state.modelo_treinado = False
 
-# --- IMPORTS ---
-import streamlit as st
-import pandas as pd
-import time
+
 
 # --- VARIÁVEIS GLOBAIS ---
 NUM_TOTAL = 37  # Números da Roleta Europeia: 0 a 36
@@ -149,18 +146,6 @@ def treinar_modelo():
     st.session_state.modelo_treinado = True
     return model, scaler
 
-def prever_proximo(modelo, scaler):
-    if not modelo:
-        return []
-    ultimos = st.session_state.historico[-SEQUENCIA_ENTRADA:]
-    if len(ultimos) < SEQUENCIA_ENTRADA:
-        ultimos = [0] * (SEQUENCIA_ENTRADA - len(ultimos)) + ultimos
-    entrada = np.array(ultimos).reshape(-1, 1)
-    entrada_norm = scaler.transform(entrada)
-    entrada_norm = entrada_norm.reshape(1, SEQUENCIA_ENTRADA, 1)
-    pred_norm = modelo.predict(entrada_norm, verbose=0)
-    pred = scaler.inverse_transform(pred_norm)
-    valor = int(np.round(pred[0][0]))
 
   def prever_proximo(modelo, scaler):
     if not modelo:
@@ -247,6 +232,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
