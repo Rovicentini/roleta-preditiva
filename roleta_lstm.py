@@ -8,6 +8,7 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.utils import to_categorical
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 import time
@@ -71,6 +72,30 @@ if 'modelo_treinado' not in st.session_state:
     st.session_state.modelo_treinado = False
 
 
+def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
+    X, y = [], []
+    for i in range(len(historico) - sequencia):
+        seq_in = historico[i:i + sequencia]
+        seq_out = historico[i + sequencia]
+        X.append(seq_in)
+        y.append(seq_out)
+    X = np.array(X)
+    y = np.array(y)
+    X = X.reshape((X.shape[0], X.shape[1], 1))  # necessário para LSTM
+    y = to_categorical(y, num_classes=NUM_TOTAL)  # one-hot
+    return X, y
+
+
+def treinar_modelo_lstm(historico, sequencia=SEQUENCIA_ENTRADA):
+    X, y = preparar_dados(historico, sequencia)
+    
+    model = Sequential()
+    model.add(LSTM(64, input_shape=(X.shape[1], 1)))
+    model.add(Dense(NUM_TOTAL, activation='softmax'))  # 37 saídas (0 a 36)
+    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    model.fit(X, y, epochs=30, batch_size=8, verbose=0)
+    
+    return model
 
 
 
@@ -222,6 +247,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
