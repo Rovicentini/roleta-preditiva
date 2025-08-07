@@ -1,94 +1,146 @@
+# Roleta IA Robusta com LSTM, TensorFlow, Análise de Tendência, e Visualização
+# Autor: Rodrigo + ChatGPT
+# Requisitos: pip install streamlit tensorflow scikit-learn pandas matplotlib numpy
+
 import streamlit as st
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
-import matplotlib.pyplot as plt
-from sklearn.preprocessing import MinMaxScaler
+import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
-import os
+from sklearn.preprocessing import MinMaxScaler
+import matplotlib.pyplot as plt
 
-# Inicializar variáveis na sessão
-if "resultados" not in st.session_state:
+# --- CONFIGURAÇÃO INICIAL ---
+st.set_page_config(layout="wide")
+st.title("🎯 IA Avançada para Roleta Europeia")
+
+# --- VARIÁVEIS GLOBAIS ---
+NUM_TOTAL = 37  # Números da Roleta Europeia: 0 a 36
+SEQUENCIA_ENTRADA = 10  # Quantos números analisar por entrada
+
+if 'historico' not in st.session_state:
+    st.session_state.historico = []
+
+if 'resultados' not in st.session_state:
     st.session_state.resultados = []
-if "acertos" not in st.session_state:
-    st.session_state.acertos = []
-if "perdas" not in st.session_state:
-    st.session_state.perdas = []
 
-st.title("IA Preditiva para Roleta - Análise Probabilística")
+if 'vizinhanca' not in st.session_state:
+    st.session_state.vizinhanca = 0
 
-# Inserção de novo número
-with st.form(key="formulario"):
-    novo_resultado = st.number_input("Insira o novo número sorteado (0 a 36):", min_value=0, max_value=36, step=1, key="input")
-    submit_button = st.form_submit_button(label="Registrar")
+if 'modelo_treinado' not in st.session_state:
+    st.session_state.modelo_treinado = False
 
-if submit_button:
-    st.session_state.resultados.append(novo_resultado)
-    st.session_state.input = 0  # Limpa o campo de entrada
-    st.experimental_rerun()
+# --- FUNÇÕES ---
+def adicionar_numero(numero):
+    try:
+        n = int(numero)
+        if 0 <= n < NUM_TOTAL:
+            st.session_state.historico.append(n)
+    except:
+        pass
 
-# Visualizar resultados
-st.subheader("Histórico de Resultados")
-st.write(st.session_state.resultados)
-
-# Função para gerar dados para o modelo
-WINDOW_SIZE = 5
-
-def preparar_dados(resultados):
+def get_dados_normalizados():
+    dados = np.array(st.session_state.historico).reshape(-1, 1)
     scaler = MinMaxScaler()
-    resultados_np = np.array(resultados).reshape(-1, 1)
-    resultados_normalizados = scaler.fit_transform(resultados_np)
+    dados_norm = scaler.fit_transform(dados)
+    return dados_norm, scaler
 
+def criar_dados_sequenciais(dados_norm):
     X, y = [], []
-    for i in range(WINDOW_SIZE, len(resultados_normalizados)):
-        X.append(resultados_normalizados[i-WINDOW_SIZE:i, 0])
-        y.append(resultados_normalizados[i, 0])
-    return np.array(X), np.array(y), scaler
+    for i in range(len(dados_norm) - SEQUENCIA_ENTRADA):
+        X.append(dados_norm[i:i+SEQUENCIA_ENTRADA])
+        y.append(dados_norm[i+SEQUENCIA_ENTRADA])
+    return np.array(X), np.array(y)
 
-# Treinar modelo se houver dados suficientes
-if len(st.session_state.resultados) > WINDOW_SIZE + 1:
-    X, y, scaler = preparar_dados(st.session_state.resultados)
-    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+def treinar_modelo():
+    dados_norm, scaler = get_dados_normalizados()
+    X, y = criar_dados_sequenciais(dados_norm)
+    if len(X) < 5:
+        return None, None
 
     model = Sequential()
-    model.add(LSTM(units=50, return_sequences=True, input_shape=(X.shape[1], 1)))
-    model.add(LSTM(units=50))
-    model.add(Dense(units=1))
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    model.fit(X, y, epochs=10, batch_size=1, verbose=0)
+    model.add(LSTM(64, activation='relu', input_shape=(SEQUENCIA_ENTRADA, 1)))
+    model.add(Dense(64, activation='relu'))
+    model.add(Dense(1))
+    model.compile(optimizer='adam', loss='mse')
+    model.fit(X, y, epochs=100, verbose=0)
+    st.session_state.modelo_treinado = True
+    return model, scaler
 
-    ultimos_resultados = st.session_state.resultados[-WINDOW_SIZE:]
-    entrada = scaler.transform(np.array(ultimos_resultados).reshape(-1, 1)).reshape(1, WINDOW_SIZE, 1)
-    previsao_normalizada = model.predict(entrada)
-    previsao = scaler.inverse_transform(previsao_normalizada)[0][0]
+def prever_proximo(modelo, scaler):
+    if not modelo:
+        return []
+    ultimos = st.session_state.historico[-SEQUENCIA_ENTRADA:]
+    if len(ultimos) < SEQUENCIA_ENTRADA:
+        ultimos = [0] * (SEQUENCIA_ENTRADA - len(ultimos)) + ultimos
+    entrada = np.array(ultimos).reshape(-1, 1)
+    entrada_norm = scaler.transform(entrada)
+    entrada_norm = entrada_norm.reshape(1, SEQUENCIA_ENTRADA, 1)
+    pred_norm = modelo.predict(entrada_norm, verbose=0)
+    pred = scaler.inverse_transform(pred_norm)
+    valor = int(np.round(pred[0][0]))
 
-    numero_previsto = int(round(previsao)) % 37
+    sugestoes = [(valor + i) % NUM_TOTAL for i in range(-st.session_state.vizinhanca, st.session_state.vizinhanca + 1)]
+    sugestoes = sorted(list(set([n % NUM_TOTAL for n in sugestoes])))
+    return sugestoes
 
-    # Vizinhança para avaliar acerto
-    vizinhos = 1  # Pode aumentar para 2 ou 3
-    numeros_vizinhos = [(numero_previsto + i) % 37 for i in range(-vizinhos, vizinhos+1)]
+def calcular_performance():
+    acertos = 0
+    total = len(st.session_state.resultados)
+    for res in st.session_state.resultados:
+        if res['acerto']:
+            acertos += 1
+    return acertos, total - acertos
 
-    st.subheader("Previsão da IA")
-    st.write(f"Próximo número previsto: **{numero_previsto}**")
-    st.write(f"Considerando vizinhos: {numeros_vizinhos}")
+def exibir_grafico_performance():
+    acertos, erros = calcular_performance()
+    fig, ax = plt.subplots()
+    ax.bar(['Acertos', 'Erros'], [acertos, erros])
+    st.pyplot(fig)
 
-    if len(st.session_state.resultados) > WINDOW_SIZE + 2:
-        ultimo_real = st.session_state.resultados[-1]
-        if ultimo_real in numeros_vizinhos:
-            st.session_state.acertos.append(1)
-            st.session_state.perdas.append(0)
-            st.success("Acerto!")
-        else:
-            st.session_state.acertos.append(0)
-            st.session_state.perdas.append(1)
-            st.error("Erro na previsão")
+# --- SIDEBAR ---
+st.sidebar.header("🎛️ Configurações")
+viz = st.sidebar.slider("Número de vizinhos (acertos)", 0, 5, st.session_state.vizinhanca)
+st.session_state.vizinhanca = viz
 
-    # Gráfico de desempenho
-    st.subheader("Desempenho da IA")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(y=np.cumsum(st.session_state.acertos), mode='lines', name='Acertos'))
-    fig.add_trace(go.Scatter(y=np.cumsum(st.session_state.perdas), mode='lines', name='Erros'))
-    st.plotly_chart(fig, use_container_width=True)
+if st.sidebar.button("🔁 Reiniciar Tudo"):
+    st.session_state.historico = []
+    st.session_state.resultados = []
+    st.session_state.modelo_treinado = False
+
+# --- INTERFACE PRINCIPAL ---
+st.subheader("🎰 Inserir Número da Roleta")
+numero = st.text_input("Digite o número sorteado (0 a 36):", key="entrada_numero")
+if numero != "" and st.session_state.get("ultima_entrada") != numero:
+    adicionar_numero(numero)
+    st.session_state.entrada_numero = ""
+    st.session_state.ultima_entrada = numero
+
+# --- EXIBIR HISTÓRICO ---
+st.subheader("📜 Histórico")
+st.write(st.session_state.historico)
+
+# --- TREINAR E PREVER ---
+if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
+    model, scaler = treinar_modelo()
+    sugestoes = prever_proximo(model, scaler)
+
+    st.subheader("📈 Sugestão de Apostas da IA")
+    st.write("**Sugestão de números:**", sugestoes)
+
+    # Comparar com último número
+    if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
+        ultimo_real = st.session_state.historico[-1]
+        acerto = ultimo_real in sugestoes
+        st.session_state.resultados.append({
+            'real': ultimo_real,
+            'previsto': sugestoes,
+            'acerto': acerto
+        })
+
+        st.write(f"**Último número real:** {ultimo_real} | **Acertou?** {'✅' if acerto else '❌'}")
+        st.subheader("📊 Desempenho da IA")
+        exibir_grafico_performance()
 else:
-    st.warning("Insira pelo menos 6 números para iniciar as previsões.")
+    st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
