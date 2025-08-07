@@ -31,19 +31,36 @@ if 'vizinhanca' not in st.session_state:
 if 'modelo_treinado' not in st.session_state:
     st.session_state.modelo_treinado = False
 
+# --- IMPORTS ---
 import streamlit as st
+import pandas as pd
+import time
 
-# --- Configurações iniciais, constantes e variáveis globais ---
-NUM_TOTAL = 37
+# --- VARIÁVEIS GLOBAIS ---
+NUM_TOTAL = 37  # Números da Roleta Europeia: 0 a 36
+SEQUENCIA_ENTRADA = 10  # Quantos números analisar por entrada
 
-# --- Sequência real da roleta europeia ---
+if 'historico' not in st.session_state:
+    st.session_state.historico = []
+
+if 'resultados' not in st.session_state:
+    st.session_state.resultados = []
+
+if 'vizinhanca' not in st.session_state:
+    st.session_state.vizinhanca = 0
+
+if 'modelo_treinado' not in st.session_state:
+    st.session_state.modelo_treinado = False
+
+# --- FUNÇÕES AUXILIARES ---
+
+# Ordem dos números na roleta europeia no sentido horário
 sequencia_roleta_europeia = [
     0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30,
     8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7,
     28, 12, 35, 3, 26
 ]
 
-# --- Função para obter os vizinhos reais de um número na roleta europeia ---
 def obter_vizinhos_roleta(numero, quantidade_vizinhos=3):
     numero = int(numero)
     if numero not in sequencia_roleta_europeia:
@@ -56,14 +73,7 @@ def obter_vizinhos_roleta(numero, quantidade_vizinhos=3):
         vizinhos.append(sequencia_roleta_europeia[(idx - i) % len(sequencia_roleta_europeia)])
         vizinhos.append(sequencia_roleta_europeia[(idx + i) % len(sequencia_roleta_europeia)])
 
-    return sorted(set(vizinhos))  # Remove duplicatas, se houver
-
-# --- Outras funções que usam os vizinhos ---
-# Ex: função de análise, predição, etc.
-
-
-
-
+    return sorted(set(vizinhos))  # Elimina duplicatas, se houver
 
 # --- FUNÇÕES ---
 def adicionar_numero(numero):
@@ -185,8 +195,3 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
-
-
-
-
-
