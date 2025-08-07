@@ -226,8 +226,8 @@ else:
 # --- TREINAR E PREVER ---
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     # Regressão (modelo atual)
-model_regressao, scaler = treinar_modelo()
-sugestoes_regressao = prever_proximo(model_regressao, scaler)
+    model_regressao, scaler = treinar_modelo()
+    sugestoes_regressao = prever_proximo(model_regressao, scaler)
 
 # Classificação com LSTM + softmax
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
@@ -283,6 +283,7 @@ if sugestoes_softmax:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
