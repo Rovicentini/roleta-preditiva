@@ -122,7 +122,10 @@ st.text_input("Digite o número sorteado (0 a 36):", key="entrada_numero", on_ch
 
 # --- EXIBIR HISTÓRICO ---
 st.subheader("📜 Histórico")
-st.write(st.session_state.historico)
+if st.session_state.historico:
+    st.markdown(" ".join([f"**{num}**" for num in st.session_state.historico[::-1]]))
+else:
+    st.info("Nenhum número inserido ainda.")
 
 # --- TREINAR E PREVER ---
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
@@ -143,9 +146,10 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
         })
 
         st.write(f"**Último número real:** {ultimo_real} | **Acertou?** {'✅' if acerto else '❌'}")
-        st.subheader("📊 Desempenho da IA")
-        exibir_grafico_performance()
+        acertos, erros = calcular_performance()
+st.sidebar.markdown(f"✅ Acertos: {acertos} | ❌ Erros: {erros} | Total: {acertos + erros}")
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
