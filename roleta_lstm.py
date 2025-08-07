@@ -31,14 +31,19 @@ if 'vizinhanca' not in st.session_state:
 if 'modelo_treinado' not in st.session_state:
     st.session_state.modelo_treinado = False
 
-# Ordem dos números na roleta europeia no sentido horário
+import streamlit as st
+
+# --- Configurações iniciais, constantes e variáveis globais ---
+NUM_TOTAL = 37
+
+# --- Sequência real da roleta europeia ---
 sequencia_roleta_europeia = [
     0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30,
     8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7,
     28, 12, 35, 3, 26
 ]
 
-# Função para buscar os vizinhos reais com base na roleta
+# --- Função para obter os vizinhos reais de um número na roleta europeia ---
 def obter_vizinhos_roleta(numero, quantidade_vizinhos=3):
     numero = int(numero)
     if numero not in sequencia_roleta_europeia:
@@ -52,6 +57,12 @@ def obter_vizinhos_roleta(numero, quantidade_vizinhos=3):
         vizinhos.append(sequencia_roleta_europeia[(idx + i) % len(sequencia_roleta_europeia)])
 
     return sorted(set(vizinhos))  # Remove duplicatas, se houver
+
+# --- Outras funções que usam os vizinhos ---
+# Ex: função de análise, predição, etc.
+
+
+
 
 
 # --- FUNÇÕES ---
@@ -174,6 +185,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
