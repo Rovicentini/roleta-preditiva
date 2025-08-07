@@ -150,9 +150,9 @@ def prever_proximo(modelo, scaler):
 
     sugestoes = [valor]
 
-    if st.session_state.vizinhanca > 0:
-        vizinhos = obter_vizinhos_roleta(valor, quantidade_vizinhos=st.session_state.vizinhanca)
-        sugestoes.extend(vizinhos)
+    if st.session_state.quantidade_vizinhos > 0:
+    vizinhos = obter_vizinhos_roleta(valor, quantidade_vizinhos=st.session_state.quantidade_vizinhos)
+    sugestoes.extend(vizinhos)
 
     sugestoes = sorted(set(sugestoes))  # Remove duplicatas e ordena
 
@@ -220,6 +220,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
