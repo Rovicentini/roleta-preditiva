@@ -26,7 +26,46 @@ if 'resultados' not in st.session_state:
     st.session_state.resultados = []
 
 if 'vizinhanca' not in st.session_state:
-    st.session_state.vizinhanca = 0
+    st.session_state.vizinhanca = {
+        0: [26, 32, 3],
+        1: [20, 33, 14],
+        2: [17, 25, 21],
+        3: [35, 26, 0],
+        4: [19, 21, 2],
+        5: [10, 24, 16],
+        6: [27, 13, 34],
+        7: [28, 12, 29],
+        8: [30, 11, 23],
+        9: [22, 18, 31],
+        10: [5, 23, 24],
+        11: [8, 30, 36],
+        12: [7, 36, 3],
+        13: [6, 34, 27],
+        14: [1, 33, 20],
+        15: [19, 32, 19],
+        16: [5, 24, 33],
+        17: [2, 25, 34],
+        18: [9, 22, 29],
+        19: [4, 15, 21],
+        20: [1, 14, 33],
+        21: [4, 2, 19],
+        22: [9, 18, 31],
+        23: [10, 8, 30],
+        24: [10, 5, 16],
+        25: [2, 17, 34],
+        26: [3, 0, 32],
+        27: [6, 13, 36],
+        28: [7, 29, 12],
+        29: [7, 28, 18],
+        30: [8, 11, 23],
+        31: [9, 22, 18],
+        32: [26, 0, 15],
+        33: [1, 14, 20],
+        34: [6, 13, 25],
+        35: [3, 12, 6],
+        36: [11, 12, 27],
+    }
+
 
 if 'modelo_treinado' not in st.session_state:
     st.session_state.modelo_treinado = False
@@ -195,5 +234,6 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
