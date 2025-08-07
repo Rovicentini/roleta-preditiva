@@ -85,8 +85,6 @@ if 'historico' not in st.session_state:
 if 'resultados' not in st.session_state:
     st.session_state.resultados = []
 
-if 'vizinhanca' not in st.session_state:
-    st.session_state.vizinhanca = 0
 
 if 'modelo_treinado' not in st.session_state:
     st.session_state.modelo_treinado = False
@@ -164,14 +162,29 @@ def prever_proximo(modelo, scaler):
     pred = scaler.inverse_transform(pred_norm)
     valor = int(np.round(pred[0][0]))
 
-    sugestoes = [valor]
-if st.session_state.vizinhanca > 0:
-    vizinhos = obter_vizinhos_roleta(valor, quantidade_vizinhos=st.session_state.vizinhanca)
-    sugestoes.extend(vizinhos)
+  def prever_proximo(modelo, scaler):
+    if not modelo:
+        return []
+    ultimos = st.session_state.historico[-SEQUENCIA_ENTRADA:]
+    if len(ultimos) < SEQUENCIA_ENTRADA:
+        ultimos = [0] * (SEQUENCIA_ENTRADA - len(ultimos)) + ultimos
+    entrada = np.array(ultimos).reshape(-1, 1)
+    entrada_norm = scaler.transform(entrada)
+    entrada_norm = entrada_norm.reshape(1, SEQUENCIA_ENTRADA, 1)
+    pred_norm = modelo.predict(entrada_norm, verbose=0)
+    pred = scaler.inverse_transform(pred_norm)
+    valor = int(np.round(pred[0][0]))
 
-sugestoes = sorted(set(sugestoes))  # Remove duplicatas e ordena
+    sugestoes = [valor]
+
+    if st.session_state.vizinhanca > 0:
+        vizinhos = obter_vizinhos_roleta(valor, quantidade_vizinhos=st.session_state.vizinhanca)
+        sugestoes.extend(vizinhos)
+
+    sugestoes = sorted(set(sugestoes))  # Remove duplicatas e ordena
 
     return sugestoes
+
 
 def calcular_performance():
     acertos = 0
@@ -234,6 +247,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
