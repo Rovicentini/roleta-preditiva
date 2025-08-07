@@ -122,6 +122,19 @@ def obter_vizinhos_roleta(numero, quantidade_vizinhos=3):
 
     return sorted(set(vizinhos))  # Elimina duplicatas, se houver
 
+def calcular_vizinhos(prob):
+    """
+    Define a quantidade de vizinhos para apostar com base na probabilidade do número.
+    Maior probabilidade = menos vizinhos (mais confiança).
+    """
+    max_viz = 5  # máximo de vizinhos a apostar
+    min_viz = 1  # mínimo
+    
+    # Inverte a escala para que prob alta gere poucos vizinhos
+    vizinhos = max_viz - int(prob * (max_viz - min_viz))
+    return max(min_viz, vizinhos)
+
+
 # --- FUNÇÕES ---
 def adicionar_numero(numero):
     try:
@@ -194,11 +207,6 @@ def calcular_performance():
 
 
 # --- SIDEBAR ---
-if 'quantidade_vizinhos' not in st.session_state:
-    st.session_state.quantidade_vizinhos = 3  # default
-
-viz = st.sidebar.slider("Número de vizinhos (acertos)", 0, 5, st.session_state.quantidade_vizinhos)
-st.session_state.quantidade_vizinhos = viz
 
 if st.sidebar.button("🔁 Reiniciar Tudo"):
     st.session_state.historico = []
@@ -234,17 +242,37 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     sugestoes_regressao = prever_proximo(model_regressao, scaler)
 
     # CLASSIFICAÇÃO
-    model_classificacao = treinar_modelo_lstm(st.session_state.historico)
-    entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
-    predicao_softmax = model_classificacao.predict(entrada, verbose=0)
-    numero_mais_provavel = int(np.argmax(predicao_softmax))
-    vizinhos_softmax = obter_vizinhos_roleta(numero_mais_provavel, quantidade_vizinhos=st.session_state.quantidade_vizinhos)
-    sugestoes_softmax = sorted(set([numero_mais_provavel] + vizinhos_softmax))
+   model_classificacao = treinar_modelo_lstm(st.session_state.historico)
+entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
+predicao_softmax = model_classificacao.predict(entrada, verbose=0)
+
+probs = predicao_softmax[0]
+
+# Definir limite dinâmico para filtrar números importantes
+limite = np.mean(probs) + np.std(probs)
+numeros_selecionados = [i for i, p in enumerate(probs) if p >= limite]
+
+sugestoes_com_vizinhos = []
+for numero in numeros_selecionados:
+    prob = probs[numero]
+    q_vizinhos = calcular_vizinhos(prob)
+    sugestoes_com_vizinhos.append((numero, q_vizinhos))
+
+# Ordenar por probabilidade decrescente
+sugestoes_com_vizinhos = sorted(sugestoes_com_vizinhos, key=lambda x: probs[x[0]], reverse=True)
+
 
     # --- EXIBIR SUGESTÕES ---
     st.subheader("📈 Sugestão de Apostas da IA")
     st.write("🔢 **Sugestão de números (Regressão):**", sugestoes_regressao)
-    st.write("🎯 **Sugestão (Classificação LSTM):**", sugestoes_softmax)
+    st.subheader("🎯 Sugestões Inteligentes da IA (Número + Quantidade de Vizinhos)")
+
+if sugestoes_com_vizinhos:
+    for num, qtd_viz in sugestoes_com_vizinhos:
+        st.write(f"Número {num} — Apostar com {qtd_viz} vizinho(s)")
+else:
+    st.write("Nenhuma sugestão forte encontrada.")
+
 
     # --- AVALIAÇÃO DE DESEMPENHO ---
     if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
@@ -270,6 +298,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
