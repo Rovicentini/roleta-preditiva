@@ -111,11 +111,14 @@ if st.sidebar.button("🔁 Reiniciar Tudo"):
 
 # --- INTERFACE PRINCIPAL ---
 st.subheader("🎰 Inserir Número da Roleta")
-numero = st.text_input("Digite o número sorteado (0 a 36):", key="entrada_numero")
-if numero != "" and st.session_state.get("ultima_entrada") != numero:
-    adicionar_numero(numero)
-    st.session_state["entrada_numero"] = ""
-    st.session_state.ultima_entrada = numero
+def adicionar_numero_callback():
+    numero = st.session_state.entrada_numero
+    if numero != "" and st.session_state.get("ultima_entrada") != numero:
+        adicionar_numero(numero)
+        st.session_state.ultima_entrada = numero
+        st.session_state.entrada_numero = ""  # limpa o campo
+
+st.text_input("Digite o número sorteado (0 a 36):", key="entrada_numero", on_change=adicionar_numero_callback)
 
 # --- EXIBIR HISTÓRICO ---
 st.subheader("📜 Histórico")
@@ -144,4 +147,5 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
         exibir_grafico_performance()
 else:
     st.info("Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
