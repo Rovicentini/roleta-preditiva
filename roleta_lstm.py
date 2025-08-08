@@ -295,7 +295,7 @@ st.session_state.resultados.append({
 })
 
 
-        st.write(f"🎯 **Último número real:** {ultimo_real} | **Acertou (Classificação)?** {'✅' if acerto_classificacao else '❌'}")
+st.write(f"🎯 **Último número real:** {ultimo_real} | **Acertou (Classificação)?** {'✅' if acerto_classificacao else '❌'}")
 
         # Avaliação Regressão
         acerto_regressao = ultimo_real in sugestoes_regressao
@@ -307,6 +307,7 @@ st.session_state.resultados.append({
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
