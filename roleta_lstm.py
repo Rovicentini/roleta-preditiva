@@ -1,5 +1,5 @@
 # Roleta IA Robusta com LSTM, TensorFlow, Análise de Tendência, e Visualização
-# Autor: Rodrigo + ChatGPT
+# Autor: Rodrigo Vicentini
 # Requisitos: pip install streamlit tensorflow scikit-learn pandas matplotlib numpy
 
 import streamlit as st
@@ -79,6 +79,8 @@ def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
         seq_out = historico[i + sequencia]
         X.append(seq_in)
         y.append(seq_out)
+    if not X or not y:
+        return None, None
     X = np.array(X)
     y = np.array(y)
     X = X.reshape((X.shape[0], X.shape[1], 1))  # necessário para LSTM
@@ -86,17 +88,23 @@ def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
     return X, y
 
 
+if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
+    model_classificacao = treinar_modelo_lstm(st.session_state.historico)
+else:
+    st.warning(f"Precisa de pelo menos {SEQUENCIA_ENTRADA + 1} números no histórico para treinar o modelo.")
+
 
 def treinar_modelo_lstm(historico, sequencia=SEQUENCIA_ENTRADA):
     X, y = preparar_dados(historico, sequencia)
-
+    if X is None or y is None:
+        return None
     model = Sequential()
     model.add(LSTM(64, input_shape=(X.shape[1], 1)))
-    model.add(Dense(NUM_TOTAL, activation='softmax'))  # 37 saídas (0 a 36)
+    model.add(Dense(NUM_TOTAL, activation='softmax'))
     model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
     model.fit(X, y, epochs=30, batch_size=8, verbose=0)
-
     return model
+
 
 
 
@@ -308,6 +316,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
