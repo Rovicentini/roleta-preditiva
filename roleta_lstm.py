@@ -285,7 +285,7 @@ else:
         ultimo_real = st.session_state.historico[-1]
 
         # Avaliação Classificação
-     numeros_sugeridos = [num for num, _ in sugestoes_com_vizinhos]
+numeros_sugeridos = [num for num, _ in sugestoes_com_vizinhos]
 acerto_classificacao = ultimo_real in numeros_sugeridos
 
 st.session_state.resultados.append({
@@ -307,6 +307,7 @@ st.session_state.resultados.append({
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
