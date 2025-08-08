@@ -79,23 +79,23 @@ def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
         seq_out = historico[i + sequencia]
         X.append(seq_in)
         y.append(seq_out)
-    X = np.array(X)
-    y = np.array(y)
-    X = X.reshape((X.shape[0], X.shape[1], 1))  # necessário para LSTM
-    y = to_categorical(y, num_classes=NUM_TOTAL)  # one-hot
-    return X, y
+        X = np.array(X)
+        y = np.array(y)
+        X = X.reshape((X.shape[0], X.shape[1], 1))  # necessário para LSTM
+        y = to_categorical(y, num_classes=NUM_TOTAL)  # one-hot
+        return X, y
 
 
 def treinar_modelo_lstm(historico, sequencia=SEQUENCIA_ENTRADA):
     X, y = preparar_dados(historico, sequencia)
     
-    model = Sequential()
-    model.add(LSTM(64, input_shape=(X.shape[1], 1)))
-    model.add(Dense(NUM_TOTAL, activation='softmax'))  # 37 saídas (0 a 36)
-    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-    model.fit(X, y, epochs=30, batch_size=8, verbose=0)
+        model = Sequential()
+        model.add(LSTM(64, input_shape=(X.shape[1], 1)))
+        model.add(Dense(NUM_TOTAL, activation='softmax'))  # 37 saídas (0 a 36)
+        model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+        model.fit(X, y, epochs=30, batch_size=8, verbose=0)
     
-    return model
+        return model
 
 
 
@@ -184,14 +184,14 @@ def prever_proximo(modelo, scaler):
     ultimos = st.session_state.historico[-SEQUENCIA_ENTRADA:]
     if len(ultimos) < SEQUENCIA_ENTRADA:
         ultimos = [0] * (SEQUENCIA_ENTRADA - len(ultimos)) + ultimos
-    entrada = np.array(ultimos).reshape(-1, 1)
-    entrada_norm = scaler.transform(entrada)
-    entrada_norm = entrada_norm.reshape(1, SEQUENCIA_ENTRADA, 1)
-    pred_norm = modelo.predict(entrada_norm, verbose=0)
-    pred = scaler.inverse_transform(pred_norm)
-    valor = int(np.round(pred[0][0]))
+        entrada = np.array(ultimos).reshape(-1, 1)
+        entrada_norm = scaler.transform(entrada)
+        entrada_norm = entrada_norm.reshape(1, SEQUENCIA_ENTRADA, 1)
+        pred_norm = modelo.predict(entrada_norm, verbose=0)
+        pred = scaler.inverse_transform(pred_norm)
+        valor = int(np.round(pred[0][0]))
 
-    sugestoes = [valor]
+        sugestoes = [valor]
 
     
         sugestoes.extend(vizinhos)
@@ -236,8 +236,8 @@ else:
     st.info("Nenhum número inserido ainda.")
 
 # --- TREINAR E PREVER ---
-sugestoes_regressao = []
-sugestoes_softmax = []
+    sugestoes_regressao = []
+    sugestoes_softmax = []
 
 # Apenas se houver dados suficientes
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
@@ -253,10 +253,10 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     probs = predicao_softmax[0]
 
 # Definir limite dinâmico para filtrar números importantes
-limite = np.mean(probs) + np.std(probs)
-numeros_selecionados = [i for i, p in enumerate(probs) if p >= limite]
+    limite = np.mean(probs) + np.std(probs)
+    numeros_selecionados = [i for i, p in enumerate(probs) if p >= limite]
 
-sugestoes_com_vizinhos = []
+    sugestoes_com_vizinhos = []
 for numero in numeros_selecionados:
     prob = probs[numero]
     q_vizinhos = calcular_vizinhos(prob)
@@ -303,6 +303,7 @@ else:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
