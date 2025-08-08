@@ -269,8 +269,9 @@ sugestoes_com_vizinhos = sorted(sugestoes_com_vizinhos, key=lambda x: probs[x[0]
 
     # --- EXIBIR SUGESTÕES ---
     st.subheader("📈 Sugestão de Apostas da IA")
-    st.write("🔢 **Sugestão de números (Regressão):**", sugestoes_regressao)
-    st.subheader("🎯 Sugestões Inteligentes da IA (Número + Quantidade de Vizinhos)")
+st.write("🔢 **Sugestão de números (Regressão):**", sugestoes_regressao)
+st.subheader("🎯 Sugestões Inteligentes da IA (Número + Quantidade de Vizinhos)")
+
 
 for num, qtd_viz in sugestoes_com_vizinhos:
     st.markdown(f"- 🎯 **{num}** com **{qtd_viz}** vizinho(s)")
@@ -304,6 +305,7 @@ else:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
