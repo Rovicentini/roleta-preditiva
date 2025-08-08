@@ -285,13 +285,15 @@ else:
         ultimo_real = st.session_state.historico[-1]
 
         # Avaliação Classificação
-      numeros_sugeridos = [num for num, _ in sugestoes_com_vizinhos]
-        acerto_classificacao = ultimo_real in numeros_sugeridos
-        st.session_state.resultados.append({
-            'real': ultimo_real,
-            'previsto': sugestoes_softmax,
-            'acerto': acerto_classificacao
-        })
+     numeros_sugeridos = [num for num, _ in sugestoes_com_vizinhos]
+acerto_classificacao = ultimo_real in numeros_sugeridos
+
+st.session_state.resultados.append({
+    'real': ultimo_real,
+    'previsto': sugestoes_softmax,
+    'acerto': acerto_classificacao
+})
+
 
         st.write(f"🎯 **Último número real:** {ultimo_real} | **Acertou (Classificação)?** {'✅' if acerto_classificacao else '❌'}")
 
@@ -305,6 +307,7 @@ else:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
