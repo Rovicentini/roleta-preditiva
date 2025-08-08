@@ -306,7 +306,8 @@ acertos, erros = calcular_performance()
 st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 
 else:
-st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+    st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
