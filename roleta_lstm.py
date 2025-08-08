@@ -88,14 +88,14 @@ def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
 
 def treinar_modelo_lstm(historico, sequencia=SEQUENCIA_ENTRADA):
     X, y = preparar_dados(historico, sequencia)
-    
-        model = Sequential()
-        model.add(LSTM(64, input_shape=(X.shape[1], 1)))
-        model.add(Dense(NUM_TOTAL, activation='softmax'))  # 37 saídas (0 a 36)
-        model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-        model.fit(X, y, epochs=30, batch_size=8, verbose=0)
-    
-        return model
+
+    model = Sequential()
+    model.add(LSTM(64, input_shape=(X.shape[1], 1)))
+    model.add(Dense(NUM_TOTAL, activation='softmax'))  # 37 saídas (0 a 36)
+    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    model.fit(X, y, epochs=30, batch_size=8, verbose=0)
+
+    return model
 
 
 
@@ -302,6 +302,7 @@ else:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
