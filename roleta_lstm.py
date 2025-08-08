@@ -202,10 +202,13 @@ def prever_proximo(modelo, scaler):
 def calcular_performance():
     acertos = 0
     total = len(st.session_state.resultados)
-        for res in st.session_state.resultados:
-if res['acerto']:
-       acertos += 1
-       return acertos, total - acertos
+    
+    for res in st.session_state.resultados:
+        if res['acerto']:
+            acertos += 1
+
+    return acertos, total - acertos
+
 
 # --- SIDEBAR ---
 
@@ -301,6 +304,7 @@ else:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
