@@ -79,11 +79,12 @@ def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
         seq_out = historico[i + sequencia]
         X.append(seq_in)
         y.append(seq_out)
-        X = np.array(X)
-        y = np.array(y)
-        X = X.reshape((X.shape[0], X.shape[1], 1))  # necessário para LSTM
-        y = to_categorical(y, num_classes=NUM_TOTAL)  # one-hot
-        return X, y
+    X = np.array(X)
+    y = np.array(y)
+    X = X.reshape((X.shape[0], X.shape[1], 1))  # necessário para LSTM
+    y = to_categorical(y, num_classes=NUM_TOTAL)  # one-hot
+    return X, y
+
 
 
 def treinar_modelo_lstm(historico, sequencia=SEQUENCIA_ENTRADA):
@@ -307,6 +308,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
