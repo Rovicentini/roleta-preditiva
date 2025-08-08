@@ -88,6 +88,7 @@ def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
     return X, y
 
 
+
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     model_classificacao = treinar_modelo_lstm(st.session_state.historico)
 else:
@@ -256,10 +257,17 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 
     # CLASSIFICAÇÃO
   # CLASSIFICAÇÃO
-model_classificacao = treinar_modelo_lstm(st.session_state.historico)
-entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
-predicao_softmax = model_classificacao.predict(entrada, verbose=0)
-probs = predicao_softmax[0]
+if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
+    model_classificacao = treinar_modelo_lstm(st.session_state.historico)
+    if model_classificacao:
+        entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
+        predicao_softmax = model_classificacao.predict(entrada, verbose=0)
+        probs = predicao_softmax[0]
+    else:
+        st.warning("Modelo de classificação não foi treinado por falta de dados.")
+else:
+    st.info(f"ℹ️ Insira ao menos {SEQUENCIA_ENTRADA + 1} números para iniciar a previsão com IA.")
+
 
 # Seleciona os números com probabilidade acima da média + 1 desvio padrão
 limite = np.mean(probs) + np.std(probs)
@@ -282,11 +290,12 @@ st.write("🔢 **Sugestão de números (Regressão):**", sugestoes_regressao)
 st.subheader("🎯 Sugestões Inteligentes da IA (Número + Quantidade de Vizinhos)")
 
 
-for num, qtd_viz in sugestoes_com_vizinhos:
-    st.markdown(f"- 🎯 **{num}** com **{qtd_viz}** vizinho(s)")
-
+if sugestoes_com_vizinhos:
+    for num, qtd_viz in sugestoes_com_vizinhos:
+        st.markdown(f"- 🎯 **{num}** com **{qtd_viz}** vizinho(s)")
 else:
     st.write("Nenhuma sugestão forte encontrada.")
+
 
 
     # --- AVALIAÇÃO DE DESEMPENHO ---
@@ -316,6 +325,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
