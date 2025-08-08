@@ -124,20 +124,16 @@ def obter_vizinhos_roleta(numero, quantidade_vizinhos=3):
 
 def calcular_vizinhos(prob):
     """
-    Define a quantidade de vizinhos para apostar com base na probabilidade do número.
-    Maior probabilidade = menos vizinhos (mais confiança).
+    Define a quantidade de vizinhos com base na probabilidade prevista.
+    Quanto maior a confiança, menor a quantidade de vizinhos sugerida.
     """
-    max_viz = 5  # máximo de vizinhos a apostar
-    min_viz = 1  # mínimo
-    
-    # Inverte a escala para que prob alta gere poucos vizinhos
+    max_viz = 9
+    min_viz = 1
+
     vizinhos = max_viz - int(prob * (max_viz - min_viz))
-    if vizinhos < min_viz:
-    vizinhos = min_viz
-elif vizinhos > max_viz:
-    vizinhos = max_viz
-return vizinhos
-    return max(min_viz, vizinhos)
+    vizinhos = max(min(vizinhos, max_viz), min_viz)
+
+    return vizinhos
 
 
 # --- FUNÇÕES ---
@@ -181,17 +177,19 @@ def treinar_modelo():
 def prever_proximo(modelo, scaler):
     if not modelo:
         return []
+
     ultimos = st.session_state.historico[-SEQUENCIA_ENTRADA:]
     if len(ultimos) < SEQUENCIA_ENTRADA:
         ultimos = [0] * (SEQUENCIA_ENTRADA - len(ultimos)) + ultimos
-        entrada = np.array(ultimos).reshape(-1, 1)
-        entrada_norm = scaler.transform(entrada)
-        entrada_norm = entrada_norm.reshape(1, SEQUENCIA_ENTRADA, 1)
-        pred_norm = modelo.predict(entrada_norm, verbose=0)
-        pred = scaler.inverse_transform(pred_norm)
-        valor = int(np.round(pred[0][0]))
 
-        sugestoes = [valor]
+    entrada = np.array(ultimos).reshape(-1, 1)
+    entrada_norm = scaler.transform(entrada)
+    entrada_norm = entrada_norm.reshape(1, SEQUENCIA_ENTRADA, 1)
+    pred_norm = modelo.predict(entrada_norm, verbose=0)
+    pred = scaler.inverse_transform(pred_norm)
+    valor = int(np.round(pred[0][0]))
+
+    return [valor]
 
     
         sugestoes.extend(vizinhos)
@@ -246,17 +244,18 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     sugestoes_regressao = prever_proximo(model_regressao, scaler)
 
     # CLASSIFICAÇÃO
-   model_classificacao = treinar_modelo_lstm(st.session_state.historico)
-        entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
-        predicao_softmax = model_classificacao.predict(entrada, verbose=0)
-    
-    probs = predicao_softmax[0]
+  # CLASSIFICAÇÃO
+model_classificacao = treinar_modelo_lstm(st.session_state.historico)
+entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
+predicao_softmax = model_classificacao.predict(entrada, verbose=0)
+probs = predicao_softmax[0]
 
-# Definir limite dinâmico para filtrar números importantes
-    limite = np.mean(probs) + np.std(probs)
-    numeros_selecionados = [i for i, p in enumerate(probs) if p >= limite]
+# Seleciona os números com probabilidade acima da média + 1 desvio padrão
+limite = np.mean(probs) + np.std(probs)
+numeros_selecionados = [i for i, p in enumerate(probs) if p >= limite]
 
-    sugestoes_com_vizinhos = []
+# Sugestão de número + quantidade de vizinhos recomendada pela IA
+sugestoes_com_vizinhos = []
 for numero in numeros_selecionados:
     prob = probs[numero]
     q_vizinhos = calcular_vizinhos(prob)
@@ -271,9 +270,9 @@ sugestoes_com_vizinhos = sorted(sugestoes_com_vizinhos, key=lambda x: probs[x[0]
     st.write("🔢 **Sugestão de números (Regressão):**", sugestoes_regressao)
     st.subheader("🎯 Sugestões Inteligentes da IA (Número + Quantidade de Vizinhos)")
 
-if sugestoes_com_vizinhos:
-    for num, qtd_viz in sugestoes_com_vizinhos:
-        st.write(f"Número {num} — Apostar com {qtd_viz} vizinho(s)")
+for num, qtd_viz in sugestoes_com_vizinhos:
+    st.markdown(f"- 🎯 **{num}** com **{qtd_viz}** vizinho(s)")
+
 else:
     st.write("Nenhuma sugestão forte encontrada.")
 
@@ -303,6 +302,7 @@ else:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
