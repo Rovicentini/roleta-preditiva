@@ -298,16 +298,15 @@ st.session_state.resultados.append({
 st.write(f"🎯 **Último número real:** {ultimo_real} | **Acertou (Classificação)?** {'✅' if acerto_classificacao else '❌'}")
 
 # Avaliação Regressão
-acerto_regressao = ultimo_real in sugestoes_regressao
-st.write(f"🔢 **Acertou (Regressão)?** {'✅' if acerto_regressao else '❌'}")
+if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
+    acerto_regressao = ultimo_real in sugestoes_regressao
+    st.write(f"🔢 **Acertou (Regressão)?** {'✅' if acerto_regressao else '❌'}")
 
-# Estatísticas
-acertos, erros = calcular_performance()
-st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
-
+    # Estatísticas
+    acertos, erros = calcular_performance()
+    st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
-
 
 
 
