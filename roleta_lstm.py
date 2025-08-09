@@ -18,6 +18,11 @@ from tensorflow.keras.utils import to_categorical
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 import time
+from tensorflow.keras.layers import Attention, Concatenate, Input
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from collections import Counter
+
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(layout="wide")
 st.title("🎯 IA Avançada para Roleta Europeia")
@@ -79,31 +84,34 @@ if 'modelo_treinado' not in st.session_state:
 
 
 def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
-    X, y = [], []
-    for i in range(len(historico) - sequencia):
-        seq_in = historico[i:i + sequencia]
-        seq_out = historico[i + sequencia]
-        X.append(seq_in)
-        y.append(seq_out)
-    if not X or not y:
-        return None, None
-    X = np.array(X)
-    y = np.array(y)
-    X = X.reshape((X.shape[0], X.shape[1], 1))  # necessário para LSTM
-    y = to_categorical(y, num_classes=NUM_TOTAL)  # one-hot
-    return X, y
-def aumentar_dados(historico):
+    X_seq, X_feat, y = [], [], []
     sequencia_roleta = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26]
-    dados_aumentados = []
-    for i in range(len(historico)-1):
-        num = historico[i]
-        idx = sequencia_roleta.index(num)
-        vizinhos = [
-            sequencia_roleta[(idx-1) % 37],
-            sequencia_roleta[(idx+1) % 37]
+    
+    for i in range(len(historico) - sequencia - 1):
+        seq = historico[i:i+sequencia]
+        target = historico[i+sequencia]
+        
+        # Features sequenciais
+        X_seq.append(seq)
+        
+        # Features adicionais
+        features = [
+            np.mean(seq),
+            np.std(seq),
+            historico.count(target)/len(historico) if len(historico) > 0 else 0,
+            sequencia_roleta.index(seq[-1]) if seq[-1] in sequencia_roleta else 0
         ]
-        dados_aumentados.extend([num] + vizinhos)
-    return dados_aumentados[-500:]  # Limita ao último 500 itens
+        X_feat.append(features)
+        y.append(target)
+    
+    if not X_seq:
+        return None, None, None
+    
+    X_seq = np.array(X_seq).reshape((-1, sequencia, 1))
+    X_feat = np.array(X_feat)
+    y = to_categorical(y, num_classes=NUM_TOTAL)
+    
+    return [X_seq, X_feat], y
 
 numeros_selecionados = []
 probs = []
@@ -111,28 +119,38 @@ sugestoes_regressao = []
 sugestoes_softmax = []
 
 
-def treinar_modelo_lstm(historico, sequencia=SEQUENCIA_ENTRADA):
-    dados_enriquecidos = aumentar_dados(historico)  # Usa a nova função de aumento
-    X, y = preparar_dados(dados_enriquecidos, sequencia)
-    if X is None or y is None:
+def treinar_modelo_lstm(historico):
+    dados_enriquecidos = aumentar_dados(historico)
+    X, y = preparar_dados(dados_enriquecidos)
+    if X is None:
         return None
-        
-    model = Sequential([
-        LSTM(128, return_sequences=True, input_shape=(X.shape[1], 1)),
-        LSTM(64),
-        Dense(64, activation='relu'),
-        Dense(NUM_TOTAL, activation='softmax')
-    ])
     
+    # Inputs
+    input_seq = Input(shape=(SEQUENCIA_ENTRADA, 1))
+    input_feat = Input(shape=(4,))  # Número de features adicionais
+    
+    # Camada LSTM com Attention
+    lstm1 = LSTM(128, return_sequences=True)(input_seq)
+    attention = Attention()([lstm1, lstm1])
+    lstm2 = LSTM(64)(attention)
+    
+    # Camadas densas para features
+    dense1 = Dense(32, activation='relu')(input_feat)
+    
+    # Combinação
+    combined = Concatenate()([lstm2, dense1])
+    output = Dense(NUM_TOTAL, activation='softmax')(combined)
+    
+    # Modelo completo
+    model = Model(inputs=[input_seq, input_feat], outputs=output)
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-        loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
+        optimizer=Adam(learning_rate=0.0005),
+        loss='categorical_crossentropy',
         metrics=['accuracy']
     )
     
     model.fit(X, y, epochs=50, batch_size=16, verbose=0)
     return model
-
 
 
 
@@ -158,6 +176,34 @@ def obter_vizinhos_roleta(numero, quantidade_vizinhos=3):
         vizinhos.append(sequencia_roleta_europeia[(idx + i) % len(sequencia_roleta_europeia)])
 
     return sorted(set(vizinhos))  # Elimina duplicatas, se houver
+
+def pos_processamento(predictions, historico, n=3):
+    """ITEM 4 - Função de pós-processamento inteligente"""
+    # Peso pelos números quentes (mais frequentes nos últimos 100 jogos)
+    freq = Counter(historico[-100:])
+    max_freq = max(freq.values()) if freq else 1
+    weighted_probs = []
+    
+    for i, prob in enumerate(predictions):
+        # Peso pela frequência
+        freq_weight = 0.5 + (freq.get(i, 0) / max_freq)
+        
+        # Peso pela posição física na roleta
+        if historico:
+            last_pos = sequencia_roleta_europeia.index(historico[-1])
+            curr_pos = sequencia_roleta_europeia.index(i)
+            dist = min(abs(curr_pos - last_pos), 37 - abs(curr_pos - last_pos))
+            pos_weight = 1.5 - (dist / 18)  # Diminui o peso conforme a distância
+            
+        weighted_probs.append(prob * freq_weight * pos_weight)
+    
+    # Normaliza
+    weighted_probs = np.array(weighted_probs)
+    weighted_probs /= weighted_probs.sum()
+    
+    # Retorna os top N números
+    top_indices = np.argsort(weighted_probs)[-n:]
+    return [(i, weighted_probs[i]) for i in top_indices]
 
 def calcular_vizinhos(prob):
     """Retorna menos vizinhos quando a confiança não é muito alta"""
@@ -260,6 +306,11 @@ if st.sidebar.button("🔁 Reiniciar Tudo"):
     st.session_state.historico = []
     st.session_state.resultados = []
     st.session_state.modelo_treinado = False
+    
+with st.sidebar.expander("⚙️ Configurações Avançadas"):
+    st.slider("Número de sugestões", 1, 5, 3, key='n_sugestoes')
+    st.checkbox("Usar padrões físicos", True, key='usar_fisica')
+    st.checkbox("Considerar frequência", True, key='usar_frequencia')
 
 # --- INTERFACE PRINCIPAL ---
 st.subheader("🎰 Inserir Número da Roleta")
@@ -281,7 +332,7 @@ else:
 
 # --- TREINAR E PREVER ---
     sugestoes_regressao = []
-    sugestoes_softmax = []
+
 
 # Apenas se houver dados suficientes
 # --- TREINAR E PREVER ---
@@ -294,65 +345,49 @@ else:
     st.warning(f"Aguarde até ter {SEQUENCIA_ENTRADA + 5} números no histórico")
 
   # CLASSIFICAÇÃO
+# CLASSIFICAÇÃO
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     model_classificacao = treinar_modelo_lstm(st.session_state.historico)
     if model_classificacao:
-        entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
-        predicao_softmax = model_classificacao.predict(entrada, verbose=0)
-        probs = predicao_softmax[0]
-
-        # TOP 3 números com maior probabilidade:
-        top_n = 3  # Você pode ajustar para 2 ou 1 se quiser menos sugestões
-        indices_ordenados = np.argsort(probs)[-top_n:]  # Pega os top_n mais prováveis
-        numeros_selecionados = [i for i in indices_ordenados if probs[i] > np.mean(probs)]
-    else:
-        st.warning("Modelo de classificação não foi treinado por falta de dados.")
-else:  # ✅ CORRETO - else alinhado com o primeiro if
-    st.info(f"ℹ️ Insira ao menos {SEQUENCIA_ENTRADA + 1} números para iniciar a previsão com IA.")
-
+        # Prepara os dados de entrada
+        seq_data = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
+        
+        # Features adicionais
+        feat_data = np.array([[
+            np.mean(st.session_state.historico[-SEQUENCIA_ENTRADA:]),
+            np.std(st.session_state.historico[-SEQUENCIA_ENTRADA:]),
+            Counter(st.session_state.historico).most_common(1)[0][1]/len(st.session_state.historico),
+            sequencia_roleta_europeia.index(st.session_state.historico[-1])
+        ]])
+        
+        # Faz a predição
+        predicao_softmax = model_classificacao.predict([seq_data, feat_data], verbose=0)[0]
+        
+        # Pós-processamento inteligente
+        sugestoes_com_vizinhos = pos_processamento(predicao_softmax, st.session_state.historico)
 
 
 
 # Sugestão de número + quantidade de vizinhos recomendada pela IA
-# ------ INÍCIO DA MODIFICAÇÃO (ITENS 3 E 4) ------
-# ------ NOVO BLOCO (ITENS 3 E 4) ------
-def filtrar_sugestoes(probs, min_conf=0.2):  # Item 3 - Filtro inteligente
-    top5_idx = np.argsort(probs)[-5:]  # Pega os 5 mais prováveis
-    sugestoes = []
-    for idx in top5_idx:
-        prob = probs[idx]
-        if prob >= min_conf:  # Filtra por confiança mínima
-            qtd_vizinhos = 2 if prob > 0.3 else (1 if prob > 0.2 else 0)
-            sugestoes.append((idx, qtd_vizinhos, prob))  # Item 4 - Adiciona confiança
-    return sorted(sugestoes, key=lambda x: x[2], reverse=True)  # Ordena por confiança
-
-# Aplicação:
-sugestoes_com_vizinhos = filtrar_sugestoes(predicao_softmax[0]) if 'predicao_softmax' in locals() else []
-# -------------------------------------
-
-# ------ FIM DA MODIFICAÇÃO ------
-
-# Ordenar por probabilidade decrescente
-sugestoes_com_vizinhos = sorted(sugestoes_com_vizinhos, key=lambda x: probs[x[0]], reverse=True)
 
 
-    # --- EXIBIR SUGESTÕES ---
 # --- EXIBIR SUGESTÕES ---
 st.subheader("📈 Sugestão de Apostas da IA")
 st.write("🔢 **Sugestão de números (Regressão):**", sugestoes_regressao)
 
 st.subheader("🎯 Sugestões Inteligentes (Foco Qualidade)")
 if sugestoes_com_vizinhos:
-    for num, qtd_viz, prob in sugestoes_com_vizinhos[:3]:  # Mostra até 3 sugestões
+    for num, prob in sorted(sugestoes_com_vizinhos, key=lambda x: x[1], reverse=True)[:st.session_state.n_sugestoes]:
+        vizinhos = obter_vizinhos_roleta(num, 1) if st.session_state.usar_fisica else []
         st.markdown(
-            f"- **Número {num}** (Confiança: {prob:.1%})" + 
-            (f" + {qtd_viz} vizinho(s)" if qtd_viz > 0 else "")
+            f"- **Número {num}** (Confiança: {prob:.1%})" +
+            (f" + vizinhos: {vizinhos}" if vizinhos else "")
         )
         
     # Validação em tempo real
     if st.session_state.historico:
         ultimo_numero = st.session_state.historico[-1]
-        acerto = any(num == ultimo_numero for num, _, _ in sugestoes_com_vizinhos)
+        acerto = any(num == ultimo_numero for num, _ in sugestoes_com_vizinhos)
         st.session_state.resultados.append(acerto)
         
         if len(st.session_state.resultados) > 10:
@@ -416,6 +451,7 @@ elif not st.session_state.historico:
 else:
     faltam = max(0, SEQUENCIA_ENTRADA + 2 - len(st.session_state.historico))
     st.info(f"📥 Insira mais {faltam} número(s) para ativar as previsões")
+
 
 
 
