@@ -230,9 +230,9 @@ if st.sidebar.button("🔁 Reiniciar Tudo"):
 st.subheader("🎰 Inserir Número da Roleta")
 def adicionar_numero_callback():
     numero = st.session_state.entrada_numero
-    if numero != "" and st.session_state.get("ultima_entrada") != numero:
+    if numero != "":  # ✅ Agora aceita repetições!
         adicionar_numero(numero)
-        st.session_state.ultima_entrada = numero
+        st.session_state.ultima_entrada = numero  # Opcional: mantém registro do último número
         st.session_state.entrada_numero = ""  # limpa o campo
 
 st.text_input("Digite o número sorteado (0 a 36):", key="entrada_numero", on_change=adicionar_numero_callback)
@@ -332,6 +332,7 @@ elif len(st.session_state.historico) == 0:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
