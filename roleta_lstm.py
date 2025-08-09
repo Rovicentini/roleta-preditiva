@@ -303,38 +303,39 @@ else:
 
 
     # --- AVALIAÇÃO DE DESEMPENHO ---
-    if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
-        ultimo_real = st.session_state.historico[-1]
+   # --- AVALIAÇÃO DE DESEMPENHO ---
+if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
+    ultimo_real = st.session_state.historico[-1]
 
-        # Avaliação Classificação
+    numeros_sugeridos = []
+    if 'sugestoes_com_vizinhos' in locals() and sugestoes_com_vizinhos:
+        numeros_sugeridos = [num for num, _ in sugestoes_com_vizinhos]
 
-numeros_sugeridos = []
-if 'sugestoes_com_vizinhos' in locals() and sugestoes_com_vizinhos:
-    numeros_sugeridos = [num for num, _ in sugestoes_com_vizinhos]
+    acerto_classificacao = ultimo_real in numeros_sugeridos
 
-acerto_classificacao = ultimo_real in numeros_sugeridos
+    st.session_state.resultados.append({
+        'real': ultimo_real,
+        'previsto': sugestoes_softmax,
+        'acerto': acerto_classificacao
+    })
 
+    st.write(f"🎯 **Último número real:** {ultimo_real} | **Acertou (Classificação)?** {'✅' if acerto_classificacao else '❌'}")
 
-
-st.session_state.resultados.append({
-    'real': ultimo_real,
-    'previsto': sugestoes_softmax,
-    'acerto': acerto_classificacao
-})
-
-
-st.write(f"🎯 **Último número real:** {ultimo_real} | **Acertou (Classificação)?** {'✅' if acerto_classificacao else '❌'}")
-
-# Avaliação Regressão
-if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
-    acerto_regressao = ultimo_real in sugestoes_regressao
-    st.write(f"🔢 **Acertou (Regressão)?** {'✅' if acerto_regressao else '❌'}")
+    # Avaliação Regressão
+    if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
+        acerto_regressao = ultimo_real in sugestoes_regressao
+        st.write(f"🔢 **Acertou (Regressão)?** {'✅' if acerto_regressao else '❌'}")
 
     # Estatísticas
     acertos, erros = calcular_performance()
     st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
+
+elif len(st.session_state.historico) == 0:
+    st.info("ℹ️ Histórico vazio, não é possível avaliar desempenho.")
+
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
