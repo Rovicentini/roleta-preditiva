@@ -25,6 +25,15 @@ from collections import Counter
 from sklearn.model_selection import TimeSeriesSplit
 from tensorflow.keras.callbacks import EarlyStopping
 
+
+# Configurações do TensorFlow para melhor performance
+physical_devices = tf.config.list_physical_devices('GPU')
+if physical_devices:
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
+
+# Reduza a verbosidade
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+tf.get_logger().setLevel('ERROR')
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(layout="wide")
 st.title("🎯 IA Avançada para Roleta Europeia")
@@ -122,65 +131,60 @@ sugestoes_softmax = []
 
 
 def treinar_modelo_lstm(historico):
-    dados_enriquecidos = aumentar_dados(historico)
-    X, y = preparar_dados(dados_enriquecidos)
-    if X is None:
-        return None
+    # 1. Limita os dados aos 150 últimos resultados (equilíbrio entre performance e qualidade)
+    dados_enriquecidos = aumentar_dados(historico[-150:]) if len(historico) > 150 else aumentar_dados(historico)
     
-    # --- NOVO: Validação Cruzada para Séries Temporais ---
-    tscv = TimeSeriesSplit(n_splits=3)  # 3 divisões mantendo ordem temporal
-    best_model = None
-    best_val_loss = float('inf')
+    # 2. Cache inteligente (só retreina se os dados mudarem significativamente)
+    @st.cache_resource(ttl=600, show_spinner=False, hash_funcs={"builtins.dict": lambda _: None})
+    def train_cached_model(_historico):
+        X, y = preparar_dados(_historico)
+        if X is None:
+            return None
+
+        tscv = TimeSeriesSplit(n_splits=2)
+        best_model = None
+        best_val_loss = float('inf')
+        
+        for train_idx, val_idx in tscv.split(X[0]):
+            # Arquitetura do modelo (igual à original)
+            input_seq = Input(shape=(SEQUENCIA_ENTRADA, 1))
+            input_feat = Input(shape=(4,))
+            
+            lstm1 = LSTM(96, return_sequences=True)(input_seq)  # Reduzido de 128
+            attention = Attention()([lstm1, lstm1])
+            lstm2 = LSTM(48)(attention)  # Reduzido de 64
+            
+            dense1 = Dense(24, activation='relu')(input_feat)  # Reduzido de 32
+            
+            combined = Concatenate()([lstm2, dense1])
+            output = Dense(NUM_TOTAL, activation='softmax')(combined)
+            
+            model = Model(inputs=[input_seq, input_feat], outputs=output)
+            
+            model.compile(
+                optimizer=Adam(learning_rate=0.0007),  # Ajuste fino
+                loss='categorical_crossentropy',
+                metrics=['accuracy']
+            )
+            
+            history = model.fit(
+                [X[0][train_idx], X[1][train_idx]],
+                y[train_idx],
+                validation_data=([X[0][val_idx], X[1][val_idx]], y[val_idx]),
+                epochs=35,  # Ponto ideal entre 30 e 50
+                batch_size=24,  # Entre 16 e 32
+                verbose=0,
+                callbacks=[EarlyStopping(patience=4)]  # Equilíbrio
+            )
+            
+            current_val_loss = min(history.history['val_loss'])
+            if current_val_loss < best_val_loss:
+                best_val_loss = current_val_loss
+                best_model = model
+                
+        return best_model
     
-    for train_idx, val_idx in tscv.split(X[0]):  # X[0] são as sequências
-        # ---- ARQUITETURA DO MODELO ORIGINAL (MANTIDA) ----
-        # Inputs
-        input_seq = Input(shape=(SEQUENCIA_ENTRADA, 1))
-        input_feat = Input(shape=(4,))
-        
-        # Camada LSTM com Attention
-        lstm1 = LSTM(128, return_sequences=True)(input_seq)
-        attention = Attention()([lstm1, lstm1])
-        lstm2 = LSTM(64)(attention)
-        
-        # Camadas densas para features
-        dense1 = Dense(32, activation='relu')(input_feat)
-        
-        # Combinação
-        combined = Concatenate()([lstm2, dense1])
-        output = Dense(NUM_TOTAL, activation='softmax')(combined)
-        
-        # Modelo completo
-        model = Model(inputs=[input_seq, input_feat], outputs=output)
-        # ------------------------------------------------
-        
-        # Compilação (igual à original)
-        model.compile(
-            optimizer=Adam(learning_rate=0.0005),
-            loss='categorical_crossentropy',
-            metrics=['accuracy']
-        )
-        
-        # Treino com early stopping (NOVO)
-        early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-        
-        history = model.fit(
-            [X[0][train_idx], X[1][train_idx]],  # Dados de treino
-            y[train_idx],
-            validation_data=([X[0][val_idx], X[1][val_idx]], y[val_idx]),  # Dados de validação
-            epochs=50,
-            batch_size=16,
-            verbose=0,
-            callbacks=[early_stop]
-        )
-        
-        # Mantém o melhor modelo (NOVO)
-        val_loss = min(history.history['val_loss'])
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_model = model
-    
-    return best_model  # Retorna o modelo com melhor performance
+    return train_cached_model(dados_enriquecidos)
 
 
 
@@ -314,13 +318,7 @@ def prever_proximo(modelo, scaler):
         return []
 
     
-    sugestoes.extend(vizinhos)
-
-    sugestoes = sorted(set(sugestoes))  # Remove duplicatas e ordena
-
-    return sugestoes
-
-
+    
 def calcular_performance():
     if not hasattr(st.session_state, 'resultados') or not st.session_state.resultados:
         return 0, 0
@@ -329,6 +327,12 @@ def calcular_performance():
     recentes = st.session_state.resultados[-50:]
     acertos = sum(1 for r in recentes if r.get('acerto', False))
     return acertos, len(recentes) - acertos
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fazer_previsao(_model, _seq, _feat):
+    """Faz previsões com cache de 1 minuto"""
+    return _model.predict([_seq, _feat], verbose=0)[0]
 
 # --- SIDEBAR ---
 
@@ -391,9 +395,8 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
         ]])
         
         # Faz a predição
-        predicao_softmax = model_classificacao.predict([seq_data, feat_data], verbose=0)[0]
+        predicao_softmax = fazer_previsao(model_classificacao, seq_data, feat_data)
         
-        # Pós-processamento inteligente
         sugestoes_com_vizinhos = pos_processamento(predicao_softmax, st.session_state.historico)
 
 
@@ -420,9 +423,13 @@ if sugestoes_com_vizinhos:
         acerto = any(num == ultimo_numero for num, _ in sugestoes_com_vizinhos)
         st.session_state.resultados.append(acerto)
         
-        if len(st.session_state.resultados) > 10:
-            taxa_acerto = np.mean(st.session_state.resultados[-20:])
-            st.metric("Taxa de Acerto (Últimos 20)", f"{taxa_acerto:.1%}")
+        # Corrigir para:
+if len(st.session_state.resultados) > 10:
+    ultimos_resultados = [r for r in st.session_state.resultados[-20:] if isinstance(r, dict)]
+    if ultimos_resultados:  # Verificar se a lista não está vazia
+        taxa_acerto = np.mean([r.get('acerto', False) for r in ultimos_resultados])
+        st.metric("Taxa de Acerto (Últimos 20)", f"{taxa_acerto:.1%}")
+            
 else:
     st.warning("Nenhuma sugestão com confiança suficiente hoje.")
 
@@ -481,6 +488,7 @@ elif not st.session_state.historico:
 else:
     faltam = max(0, SEQUENCIA_ENTRADA + 2 - len(st.session_state.historico))
     st.info(f"📥 Insira mais {faltam} número(s) para ativar as previsões")
+
 
 
 
