@@ -22,6 +22,8 @@ from tensorflow.keras.layers import Attention, Concatenate, Input
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from collections import Counter
+from sklearn.model_selection import TimeSeriesSplit
+from tensorflow.keras.callbacks import EarlyStopping
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(layout="wide")
@@ -125,32 +127,60 @@ def treinar_modelo_lstm(historico):
     if X is None:
         return None
     
-    # Inputs
-    input_seq = Input(shape=(SEQUENCIA_ENTRADA, 1))
-    input_feat = Input(shape=(4,))  # Número de features adicionais
+    # --- NOVO: Validação Cruzada para Séries Temporais ---
+    tscv = TimeSeriesSplit(n_splits=3)  # 3 divisões mantendo ordem temporal
+    best_model = None
+    best_val_loss = float('inf')
     
-    # Camada LSTM com Attention
-    lstm1 = LSTM(128, return_sequences=True)(input_seq)
-    attention = Attention()([lstm1, lstm1])
-    lstm2 = LSTM(64)(attention)
+    for train_idx, val_idx in tscv.split(X[0]):  # X[0] são as sequências
+        # ---- ARQUITETURA DO MODELO ORIGINAL (MANTIDA) ----
+        # Inputs
+        input_seq = Input(shape=(SEQUENCIA_ENTRADA, 1))
+        input_feat = Input(shape=(4,))
+        
+        # Camada LSTM com Attention
+        lstm1 = LSTM(128, return_sequences=True)(input_seq)
+        attention = Attention()([lstm1, lstm1])
+        lstm2 = LSTM(64)(attention)
+        
+        # Camadas densas para features
+        dense1 = Dense(32, activation='relu')(input_feat)
+        
+        # Combinação
+        combined = Concatenate()([lstm2, dense1])
+        output = Dense(NUM_TOTAL, activation='softmax')(combined)
+        
+        # Modelo completo
+        model = Model(inputs=[input_seq, input_feat], outputs=output)
+        # ------------------------------------------------
+        
+        # Compilação (igual à original)
+        model.compile(
+            optimizer=Adam(learning_rate=0.0005),
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
+        
+        # Treino com early stopping (NOVO)
+        early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+        
+        history = model.fit(
+            [X[0][train_idx], X[1][train_idx]],  # Dados de treino
+            y[train_idx],
+            validation_data=([X[0][val_idx], X[1][val_idx]], y[val_idx]),  # Dados de validação
+            epochs=50,
+            batch_size=16,
+            verbose=0,
+            callbacks=[early_stop]
+        )
+        
+        # Mantém o melhor modelo (NOVO)
+        val_loss = min(history.history['val_loss'])
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model = model
     
-    # Camadas densas para features
-    dense1 = Dense(32, activation='relu')(input_feat)
-    
-    # Combinação
-    combined = Concatenate()([lstm2, dense1])
-    output = Dense(NUM_TOTAL, activation='softmax')(combined)
-    
-    # Modelo completo
-    model = Model(inputs=[input_seq, input_feat], outputs=output)
-    model.compile(
-        optimizer=Adam(learning_rate=0.0005),
-        loss='categorical_crossentropy',
-        metrics=['accuracy']
-    )
-    
-    model.fit(X, y, epochs=50, batch_size=16, verbose=0)
-    return model
+    return best_model  # Retorna o modelo com melhor performance
 
 
 
@@ -451,6 +481,7 @@ elif not st.session_state.historico:
 else:
     faltam = max(0, SEQUENCIA_ENTRADA + 2 - len(st.session_state.historico))
     st.info(f"📥 Insira mais {faltam} número(s) para ativar as previsões")
+
 
 
 
