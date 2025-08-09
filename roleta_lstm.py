@@ -281,15 +281,14 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
         predicao_softmax = model_classificacao.predict(entrada, verbose=0)
         probs = predicao_softmax[0]
 
-        # Por isto (apenas os TOP 3 números com maior probabilidade):
-top_n = 3  # Você pode ajustar para 2 ou 1 se quiser menos sugestões
-indices_ordenados = np.argsort(probs)[-top_n:]  # Pega os top_n mais prováveis
-numeros_selecionados = [i for i in indices_ordenados if probs[i] > np.mean(probs)]
+        # TOP 3 números com maior probabilidade:
+        top_n = 3  # Você pode ajustar para 2 ou 1 se quiser menos sugestões
+        indices_ordenados = np.argsort(probs)[-top_n:]  # Pega os top_n mais prováveis
+        numeros_selecionados = [i for i in indices_ordenados if probs[i] > np.mean(probs)]
     else:
         st.warning("Modelo de classificação não foi treinado por falta de dados.")
-    else:
+else:  # ✅ CORRETO - else alinhado com o primeiro if
     st.info(f"ℹ️ Insira ao menos {SEQUENCIA_ENTRADA + 1} números para iniciar a previsão com IA.")
-
 
 
 
@@ -368,6 +367,7 @@ elif len(st.session_state.historico) == 0:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
