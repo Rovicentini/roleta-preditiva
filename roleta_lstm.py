@@ -249,12 +249,10 @@ def calcular_performance():
     if not hasattr(st.session_state, 'resultados') or not st.session_state.resultados:
         return 0, 0
     
-    resultados = st.session_state.resultados[-50:]  # Pega os últimos 50 resultados
-    
-    acertos = sum(1 for r in resultados if isinstance(r, dict) and r.get('acerto', False))
-    total = len(resultados)
-    
-    return acertos, total - acertos
+    # Considera apenas os últimos 50 resultados para cálculo
+    recentes = st.session_state.resultados[-50:]
+    acertos = sum(1 for r in recentes if r.get('acerto', False))
+    return acertos, len(recentes) - acertos
 
 # --- SIDEBAR ---
 
@@ -424,6 +422,7 @@ elif not st.session_state.historico:
     st.info("ℹ️ Histórico vazio. Insira números para começar.")
 else:
     st.info(f"ℹ️ Insira mais {SEQUENCIA_ENTRADA + 2 - len(st.session_state.historico)} números para análise.")
+
 
 
 
