@@ -246,23 +246,15 @@ def prever_proximo(modelo, scaler):
 
 
 def calcular_performance():
-    if not hasattr(st.session_state, 'resultados') or len(st.session_state.resultados) == 0:
+    if not hasattr(st.session_state, 'resultados') or not st.session_state.resultados:
         return 0, 0
     
-    resultados_recentes = st.session_state.resultados[-50:]
+    resultados = st.session_state.resultados[-50:]  # Pega os últimos 50 resultados
     
-    # Versão segura que funciona com ambos os formatos
-    acertos = 0
-    for resultado in resultados_recentes:
-        if isinstance(resultado, dict):  # Para os resultados antigos (formato dicionário)
-            if resultado.get('acerto', False):
-                acertos += 1
-        else:  # Para os novos resultados (booleanos diretos)
-            if resultado:
-                acertos += 1
-                
-    return acertos, len(resultados_recentes) - acertos
-
+    acertos = sum(1 for r in resultados if isinstance(r, dict) and r.get('acerto', False))
+    total = len(resultados)
+    
+    return acertos, total - acertos
 
 # --- SIDEBAR ---
 
@@ -373,48 +365,50 @@ else:
 
 
 
-  # --- AVALIAÇÃO DE DESEMPENHO ---
+# --- AVALIAÇÃO DE DESEMPENHO ---
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
-    ultimo_numero = st.session_state.historico[-1]
-    
-    # Verifica acerto na classificação
-    acerto_classificacao = False
-    if 'sugestoes_com_vizinhos' in locals() and sugestoes_com_vizinhos:
-        numeros_sugeridos = [num for num, _, _ in sugestoes_com_vizinhos]
-        acerto_classificacao = ultimo_numero in numeros_sugeridos
-    
-    # Verifica acerto na regressão
-    acerto_regressao = False
-    if sugestoes_regressao:
-        acerto_regressao = ultimo_numero in sugestoes_regressao
-    
-    # Armazena resultado (formato simplificado)
-    st.session_state.resultados.append(acerto_classificacao)
-    
-    # Exibe resultados
-    st.write(f"🎯 Último número: {ultimo_numero} | "
-             f"Classificação: {'✅' if acerto_classificacao else '❌'} | "
-             f"Regressão: {'✅' if acerto_regressao else '❌'}")
-    
-    # Estatísticas
-    acertos, erros = calcular_performance()
-    st.sidebar.markdown(f"📊 Performance | ✅ {acertos} | ❌ {erros} | 🔁 {acertos + erros}")
+    try:
+        ultimo_numero = st.session_state.historico[-1]
+        
+        # Calcula acerto na classificação de forma segura
+        acerto_class = False
+        if 'sugestoes_com_vizinhos' in locals() and sugestoes_com_vizinhos:
+            numeros_sugeridos = [num for num, _, _ in sugestoes_com_vizinhos]
+            acerto_class = ultimo_numero in numeros_sugeridos
+        
+        # Calcula acerto na regressão de forma segura
+        acerto_reg = ultimo_numero in sugestoes_regressao if sugestoes_regressao else False
+        
+        # Armazena o resultado de forma consistente
+        resultado = {
+            'real': ultimo_numero,
+            'previsto_class': numeros_sugeridos if 'numeros_sugeridos' in locals() else [],
+            'previsto_reg': sugestoes_regressao,
+            'acerto': acerto_class
+        }
+        st.session_state.resultados.append(resultado)
+        
+        # Exibe os resultados
+        st.write(f"🎯 Último número: {ultimo_numero}")
+        st.write(f"🔍 Classificação: {'✅' if acerto_class else '❌'} (Previu: {numeros_sugeridos if 'numeros_sugeridos' in locals() else 'N/A'})")
+        st.write(f"📊 Regressão: {'✅' if acerto_reg else '❌'} (Previu: {sugestoes_regressao})")
+        
+        # Atualiza estatísticas
+        acertos, erros = calcular_performance()
+        st.sidebar.markdown(f"""
+            **Performance (Últimos 50):**  
+            ✅ Acertos: {acertos}  
+            ❌ Erros: {erros}  
+            🎯 Precisão: {acertos/(acertos+erros)*100:.1f}%
+        """)
+        
+    except Exception as e:
+        st.error(f"Erro na avaliação: {str(e)}")
 
-elif len(st.session_state.historico) == 0:
-    st.info("ℹ️ Histórico vazio")
+elif not st.session_state.historico:
+    st.info("ℹ️ Histórico vazio. Insira números para começar.")
 else:
-    st.info(f"ℹ️ Insira mais {SEQUENCIA_ENTRADA + 2 - len(st.session_state.historico)} números")
-
-    # Estatísticas
-acertos, erros = calcular_performance()
-st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
-
-if len(st.session_state.historico) == 0:
-    st.info("ℹ️ Histórico vazio, não é possível avaliar desempenho.")
-elif len(st.session_state.historico) < SEQUENCIA_ENTRADA + 2:
-    st.info(f"ℹ️ Insira ao menos {SEQUENCIA_ENTRADA + 1} números para iniciar a previsão com IA.")
-
-
+    st.info(f"ℹ️ Insira mais {SEQUENCIA_ENTRADA + 2 - len(st.session_state.historico)} números para análise.")
 
 
 
