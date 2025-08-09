@@ -393,7 +393,7 @@ if len(st.session_state.historico) > 0:
         'acerto': acerto_classificacao
     })
 # Por isso (igual ao outro local):
-st.session_state.resultados.append(acerto_classificacao)
+#st.session_state.resultados.append(acerto_classificacao)
 
     # Avaliação Regressão
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
@@ -408,6 +408,7 @@ if len(st.session_state.historico) == 0:
     st.info("ℹ️ Histórico vazio, não é possível avaliar desempenho.")
 elif len(st.session_state.historico) < SEQUENCIA_ENTRADA + 2:
     st.info(f"ℹ️ Insira ao menos {SEQUENCIA_ENTRADA + 1} números para iniciar a previsão com IA.")
+
 
 
 
