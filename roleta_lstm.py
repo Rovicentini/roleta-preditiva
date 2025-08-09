@@ -260,7 +260,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     model_classificacao = treinar_modelo_lstm(st.session_state.historico)
     if model_classificacao:
-        entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
+       entrada = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
        predicao_softmax = model_classificacao.predict(entrada, verbose=0)
        probs = predicao_softmax[0]
 
@@ -328,6 +328,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
