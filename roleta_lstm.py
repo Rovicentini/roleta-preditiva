@@ -385,12 +385,13 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
     acerto_classificacao = ultimo_real in numeros_sugeridos
 
  # Substitua isso:
-st.session_state.resultados.append({
-    'real': ultimo_real,
-    'previsto': sugestoes_softmax,
-    'acerto': acerto_classificacao
-})
-
+if len(st.session_state.historico) > 0:
+    ultimo_numero = st.session_state.historico[-1]
+    st.session_state.resultados.append({
+        'real': ultimo_numero,  # ✅ Usa o último número do histórico
+        'previsto': sugestoes_softmax,
+        'acerto': acerto_classificacao
+    })
 # Por isso (igual ao outro local):
 st.session_state.resultados.append(acerto_classificacao)
 
@@ -407,6 +408,7 @@ if len(st.session_state.historico) == 0:
     st.info("ℹ️ Histórico vazio, não é possível avaliar desempenho.")
 elif len(st.session_state.historico) < SEQUENCIA_ENTRADA + 2:
     st.info(f"ℹ️ Insira ao menos {SEQUENCIA_ENTRADA + 1} números para iniciar a previsão com IA.")
+
 
 
 
