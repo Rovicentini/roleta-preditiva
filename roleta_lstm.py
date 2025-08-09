@@ -88,6 +88,8 @@ def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
     return X, y
 
 
+numeros_selecionados = []
+probs = []
 
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     model_classificacao = treinar_modelo_lstm(st.session_state.historico)
@@ -327,6 +329,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
