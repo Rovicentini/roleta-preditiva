@@ -395,7 +395,7 @@ st.session_state.resultados.append({
 st.session_state.resultados.append(acerto_classificacao)
 
     # Avaliação Regressão
-    if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
+if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
         acerto_regressao = ultimo_real in sugestoes_regressao
         st.write(f"🔢 **Acertou (Regressão)?** {'✅' if acerto_regressao else '❌'}")
 
@@ -408,6 +408,7 @@ elif len(st.session_state.historico) == 0:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
