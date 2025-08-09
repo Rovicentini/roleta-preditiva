@@ -1,6 +1,12 @@
 # Roleta IA Robusta com LSTM, TensorFlow, Análise de Tendência, e Visualização
 # Autor: Rodrigo Vicentini
 # Requisitos: pip install streamlit tensorflow scikit-learn pandas matplotlib numpy
+# Configuração do TensorFlow para evitar warnings
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+import tensorflow as tf
+tf.get_logger().setLevel('ERROR')
+
 
 import streamlit as st
 import numpy as np
@@ -168,37 +174,50 @@ def criar_dados_sequenciais(dados_norm):
     return np.array(X), np.array(y)
 
 def treinar_modelo():
-    dados_norm, scaler = get_dados_normalizados()
-    X, y = criar_dados_sequenciais(dados_norm)
-    if len(X) < 5:
+    # Verifica se há dados suficientes
+    if len(st.session_state.historico) < SEQUENCIA_ENTRADA + 5:  # Buffer adicional
+        st.warning(f"Necessário ao menos {SEQUENCIA_ENTRADA + 5} números para treinar")
         return None, None
+    
+    try:
+        dados_norm, scaler = get_dados_normalizados()
+        X, y = criar_dados_sequenciais(dados_norm)
+        
+        if len(X) == 0 or len(y) == 0:
+            return None, None
 
-    model = Sequential()
-    model.add(LSTM(64, activation='relu', input_shape=(SEQUENCIA_ENTRADA, 1)))
-    model.add(Dense(64, activation='relu'))
-    model.add(Dense(1))
-    model.compile(optimizer='adam', loss='mse')
-    model.fit(X, y, epochs=100, verbose=0)
-    st.session_state.modelo_treinado = True
-    return model, scaler
+        model = Sequential()
+        model.add(LSTM(64, activation='relu', input_shape=(SEQUENCIA_ENTRADA, 1)))
+        model.add(Dense(64, activation='relu'))
+        model.add(Dense(1))
+        model.compile(optimizer='adam', loss='mse')
+        
+        # Adicionando callback para evitar erros
+        early_stop = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=3)
+        model.fit(X, y, epochs=100, verbose=0, callbacks=[early_stop])
+        
+        st.session_state.modelo_treinado = True
+        return model, scaler
+        
+    except Exception as e:
+        st.error(f"Erro ao treinar modelo: {str(e)}")
+        return None, None
 
 
 def prever_proximo(modelo, scaler):
-    if not modelo:
+    if not modelo or not scaler or len(st.session_state.historico) < SEQUENCIA_ENTRADA:
         return []
 
-    ultimos = st.session_state.historico[-SEQUENCIA_ENTRADA:]
-    if len(ultimos) < SEQUENCIA_ENTRADA:
-        ultimos = [0] * (SEQUENCIA_ENTRADA - len(ultimos)) + ultimos
-
-    entrada = np.array(ultimos).reshape(-1, 1)
-    entrada_norm = scaler.transform(entrada)
-    entrada_norm = entrada_norm.reshape(1, SEQUENCIA_ENTRADA, 1)
-    pred_norm = modelo.predict(entrada_norm, verbose=0)
-    pred = scaler.inverse_transform(pred_norm)
-    valor = int(np.round(pred[0][0]))
-
-    return [valor]
+    try:
+        ultimos = st.session_state.historico[-SEQUENCIA_ENTRADA:]
+        entrada = np.array(ultimos).reshape(-1, 1)
+        entrada_norm = scaler.transform(entrada)
+        entrada_norm = entrada_norm.reshape(1, SEQUENCIA_ENTRADA, 1)
+        pred_norm = modelo.predict(entrada_norm, verbose=0)
+        pred = scaler.inverse_transform(pred_norm)
+        return [int(np.round(pred[0][0]))]
+    except:
+        return []
 
     
     sugestoes.extend(vizinhos)
@@ -249,12 +268,15 @@ else:
     sugestoes_softmax = []
 
 # Apenas se houver dados suficientes
-if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
-    # REGRESSÃO
+# --- TREINAR E PREVER ---
+# ✅ CÓDIGO CORRIGIDO ✅
+if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 5:  # Novo limite seguro
     model_regressao, scaler = treinar_modelo()
-    sugestoes_regressao = prever_proximo(model_regressao, scaler)
+    if model_regressao and scaler:  # Verifica se o modelo é válido
+        sugestoes_regressao = prever_proximo(model_regressao, scaler)
+else:
+    st.warning(f"Aguarde até ter {SEQUENCIA_ENTRADA + 5} números no histórico")
 
-    # CLASSIFICAÇÃO
   # CLASSIFICAÇÃO
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     model_classificacao = treinar_modelo_lstm(st.session_state.historico)
@@ -332,6 +354,7 @@ elif len(st.session_state.historico) == 0:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
