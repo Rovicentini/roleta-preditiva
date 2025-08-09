@@ -93,11 +93,6 @@ probs = []
 sugestoes_regressao = []
 sugestoes_softmax = []
 
-if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
-    model_classificacao = treinar_modelo_lstm(st.session_state.historico)
-else:
-    st.warning(f"Precisa de pelo menos {SEQUENCIA_ENTRADA + 1} números no histórico para treinar o modelo.")
-
 
 def treinar_modelo_lstm(historico, sequencia=SEQUENCIA_ENTRADA):
     X, y = preparar_dados(historico, sequencia)
@@ -337,6 +332,7 @@ elif len(st.session_state.historico) == 0:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
