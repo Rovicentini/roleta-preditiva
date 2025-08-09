@@ -307,8 +307,13 @@ else:
         ultimo_real = st.session_state.historico[-1]
 
         # Avaliação Classificação
-numeros_sugeridos = [num for num, _ in sugestoes_com_vizinhos]
+numeros_sugeridos = []
+
+if 'sugestoes_com_vizinhos' in locals() and sugestoes_com_vizinhos:
+    numeros_sugeridos = [num for num, _ in sugestoes_com_vizinhos]
+
 acerto_classificacao = ultimo_real in numeros_sugeridos
+
 
 st.session_state.resultados.append({
     'real': ultimo_real,
@@ -329,6 +334,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
