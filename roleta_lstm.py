@@ -330,7 +330,7 @@ def filtrar_sugestoes(probs, min_conf=0.2):  # Item 3 - Filtro inteligente
 # Aplicação:
 sugestoes_com_vizinhos = filtrar_sugestoes(predicao_softmax[0]) if 'predicao_softmax' in locals() else []
 # -------------------------------------
-)
+
 # ------ FIM DA MODIFICAÇÃO ------
 
 # Ordenar por probabilidade decrescente
@@ -397,6 +397,7 @@ elif len(st.session_state.historico) == 0:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
