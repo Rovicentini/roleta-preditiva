@@ -90,6 +90,8 @@ def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
 
 numeros_selecionados = []
 probs = []
+sugestoes_regressao = []
+sugestoes_softmax = []
 
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     model_classificacao = treinar_modelo_lstm(st.session_state.historico)
@@ -335,6 +337,7 @@ elif len(st.session_state.historico) == 0:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
