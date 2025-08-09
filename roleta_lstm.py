@@ -268,7 +268,7 @@ limite = np.mean(probs) + np.std(probs)
 numeros_selecionados = [i for i, p in enumerate(probs) if p >= limite]
     else:
         st.warning("Modelo de classificação não foi treinado por falta de dados.")
-else:
+    else:
     st.info(f"ℹ️ Insira ao menos {SEQUENCIA_ENTRADA + 1} números para iniciar a previsão com IA.")
 
 
@@ -328,6 +328,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
