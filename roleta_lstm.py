@@ -273,9 +273,7 @@ else:
 
 
 
-# Seleciona os números com probabilidade acima da média + 1 desvio padrão
-limite = np.mean(probs) + np.std(probs)
-numeros_selecionados = [i for i, p in enumerate(probs) if p >= limite]
+
 
 # Sugestão de número + quantidade de vizinhos recomendada pela IA
 sugestoes_com_vizinhos = []
@@ -329,6 +327,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
     st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
