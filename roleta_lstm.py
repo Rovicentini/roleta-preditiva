@@ -138,17 +138,13 @@ def obter_vizinhos_roleta(numero, quantidade_vizinhos=3):
     return sorted(set(vizinhos))  # Elimina duplicatas, se houver
 
 def calcular_vizinhos(prob):
-    """
-    Define a quantidade de vizinhos com base na probabilidade prevista.
-    Quanto maior a confiança, menor a quantidade de vizinhos sugerida.
-    """
-    max_viz = 9
-    min_viz = 1
-
-    vizinhos = max_viz - int(prob * (max_viz - min_viz))
-    vizinhos = max(min(vizinhos, max_viz), min_viz)
-
-    return vizinhos
+    """Retorna menos vizinhos quando a confiança não é muito alta"""
+    if prob > 0.3:  # Se probabilidade > 30%
+        return 2  # Máximo 2 vizinhos
+    elif prob > 0.2:
+        return 1  # Máximo 1 vizinho
+    else:
+        return 0  # Sem vizinhos
 
 
 # --- FUNÇÕES ---
@@ -285,8 +281,10 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
         predicao_softmax = model_classificacao.predict(entrada, verbose=0)
         probs = predicao_softmax[0]
 
-        limite = np.mean(probs) + np.std(probs)
-        numeros_selecionados = [i for i, p in enumerate(probs) if p >= limite]
+        # Por isto (apenas os TOP 3 números com maior probabilidade):
+top_n = 3  # Você pode ajustar para 2 ou 1 se quiser menos sugestões
+indices_ordenados = np.argsort(probs)[-top_n:]  # Pega os top_n mais prováveis
+numeros_selecionados = [i for i in indices_ordenados if probs[i] > np.mean(probs)]
     else:
         st.warning("Modelo de classificação não foi treinado por falta de dados.")
 else:
@@ -297,11 +295,27 @@ else:
 
 
 # Sugestão de número + quantidade de vizinhos recomendada pela IA
+# ------ INÍCIO DA MODIFICAÇÃO (ITENS 3 E 4) ------
 sugestoes_com_vizinhos = []
 for numero in numeros_selecionados:
     prob = probs[numero]
     q_vizinhos = calcular_vizinhos(prob)
     sugestoes_com_vizinhos.append((numero, q_vizinhos))
+
+# ITEM 3: Filtra apenas sugestões com probabilidade > 15%
+sugestoes_com_vizinhos = [
+    (num, qtd_viz) 
+    for num, qtd_viz in sugestoes_com_vizinhos 
+    if probs[num] > 0.15  # Ignora probabilidades baixas
+]
+
+# ITEM 4: Ordena por confiança (maior probabilidade primeiro)
+sugestoes_com_vizinhos = sorted(
+    sugestoes_com_vizinhos,
+    key=lambda x: probs[x[0]], 
+    reverse=True
+)
+# ------ FIM DA MODIFICAÇÃO ------
 
 # Ordenar por probabilidade decrescente
 sugestoes_com_vizinhos = sorted(sugestoes_com_vizinhos, key=lambda x: probs[x[0]], reverse=True)
@@ -354,6 +368,7 @@ elif len(st.session_state.historico) == 0:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
