@@ -92,7 +92,18 @@ def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
     X = X.reshape((X.shape[0], X.shape[1], 1))  # necessário para LSTM
     y = to_categorical(y, num_classes=NUM_TOTAL)  # one-hot
     return X, y
-
+def aumentar_dados(historico):
+    sequencia_roleta = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26]
+    dados_aumentados = []
+    for i in range(len(historico)-1):
+        num = historico[i]
+        idx = sequencia_roleta.index(num)
+        vizinhos = [
+            sequencia_roleta[(idx-1) % 37],
+            sequencia_roleta[(idx+1) % 37]
+        ]
+        dados_aumentados.extend([num] + vizinhos)
+    return dados_aumentados[-500:]  # Limita ao último 500 itens
 
 numeros_selecionados = []
 probs = []
@@ -101,14 +112,25 @@ sugestoes_softmax = []
 
 
 def treinar_modelo_lstm(historico, sequencia=SEQUENCIA_ENTRADA):
-    X, y = preparar_dados(historico, sequencia)
+    dados_enriquecidos = aumentar_dados(historico)  # Usa a nova função de aumento
+    X, y = preparar_dados(dados_enriquecidos, sequencia)
     if X is None or y is None:
         return None
-    model = Sequential()
-    model.add(LSTM(64, input_shape=(X.shape[1], 1)))
-    model.add(Dense(NUM_TOTAL, activation='softmax'))
-    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-    model.fit(X, y, epochs=30, batch_size=8, verbose=0)
+        
+    model = Sequential([
+        LSTM(128, return_sequences=True, input_shape=(X.shape[1], 1)),
+        LSTM(64),
+        Dense(64, activation='relu'),
+        Dense(NUM_TOTAL, activation='softmax')
+    ])
+    
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+        loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
+        metrics=['accuracy']
+    )
+    
+    model.fit(X, y, epochs=50, batch_size=16, verbose=0)
     return model
 
 
@@ -224,14 +246,13 @@ def prever_proximo(modelo, scaler):
 
 
 def calcular_performance():
-    acertos = 0
-    total = len(st.session_state.resultados)
-    
-    for res in st.session_state.resultados:
-        if res['acerto']:
-            acertos += 1
-
-    return acertos, total - acertos
+    if not hasattr(st.session_state, 'resultados') or len(st.session_state.resultados) == 0:
+        return 0, 0
+        
+    # Pega os últimos 50 resultados para cálculo
+    resultados_recentes = st.session_state.resultados[-50:]
+    acertos = sum(resultados_recentes)
+    return acertos, len(resultados_recentes) - acertos
 
 
 # --- SIDEBAR ---
@@ -295,24 +316,20 @@ else:  # ✅ CORRETO - else alinhado com o primeiro if
 
 # Sugestão de número + quantidade de vizinhos recomendada pela IA
 # ------ INÍCIO DA MODIFICAÇÃO (ITENS 3 E 4) ------
-sugestoes_com_vizinhos = []
-for numero in numeros_selecionados:
-    prob = probs[numero]
-    q_vizinhos = calcular_vizinhos(prob)
-    sugestoes_com_vizinhos.append((numero, q_vizinhos))
+# ------ NOVO BLOCO (ITENS 3 E 4) ------
+def filtrar_sugestoes(probs, min_conf=0.2):  # Item 3 - Filtro inteligente
+    top5_idx = np.argsort(probs)[-5:]  # Pega os 5 mais prováveis
+    sugestoes = []
+    for idx in top5_idx:
+        prob = probs[idx]
+        if prob >= min_conf:  # Filtra por confiança mínima
+            qtd_vizinhos = 2 if prob > 0.3 else (1 if prob > 0.2 else 0)
+            sugestoes.append((idx, qtd_vizinhos, prob))  # Item 4 - Adiciona confiança
+    return sorted(sugestoes, key=lambda x: x[2], reverse=True)  # Ordena por confiança
 
-# ITEM 3: Filtra apenas sugestões com probabilidade > 15%
-sugestoes_com_vizinhos = [
-    (num, qtd_viz) 
-    for num, qtd_viz in sugestoes_com_vizinhos 
-    if probs[num] > 0.15  # Ignora probabilidades baixas
-]
-
-# ITEM 4: Ordena por confiança (maior probabilidade primeiro)
-sugestoes_com_vizinhos = sorted(
-    sugestoes_com_vizinhos,
-    key=lambda x: probs[x[0]], 
-    reverse=True
+# Aplicação:
+sugestoes_com_vizinhos = filtrar_sugestoes(predicao_softmax[0]) if 'predicao_softmax' in locals() else []
+# -------------------------------------
 )
 # ------ FIM DA MODIFICAÇÃO ------
 
@@ -321,16 +338,29 @@ sugestoes_com_vizinhos = sorted(sugestoes_com_vizinhos, key=lambda x: probs[x[0]
 
 
     # --- EXIBIR SUGESTÕES ---
+# --- EXIBIR SUGESTÕES ---
 st.subheader("📈 Sugestão de Apostas da IA")
 st.write("🔢 **Sugestão de números (Regressão):**", sugestoes_regressao)
-st.subheader("🎯 Sugestões Inteligentes da IA (Número + Quantidade de Vizinhos)")
 
-
+st.subheader("🎯 Sugestões Inteligentes (Foco Qualidade)")
 if sugestoes_com_vizinhos:
-    for num, qtd_viz in sugestoes_com_vizinhos:
-        st.markdown(f"- 🎯 **{num}** com **{qtd_viz}** vizinho(s)")
+    for num, qtd_viz, prob in sugestoes_com_vizinhos[:3]:  # Mostra até 3 sugestões
+        st.markdown(
+            f"- **Número {num}** (Confiança: {prob:.1%})" + 
+            (f" + {qtd_viz} vizinho(s)" if qtd_viz > 0 else "")
+        )
+        
+    # Validação em tempo real
+    if st.session_state.historico:
+        ultimo_numero = st.session_state.historico[-1]
+        acerto = any(num == ultimo_numero for num, _, _ in sugestoes_com_vizinhos)
+        st.session_state.resultados.append(acerto)
+        
+        if len(st.session_state.resultados) > 10:
+            taxa_acerto = np.mean(st.session_state.resultados[-20:])
+            st.metric("Taxa de Acerto (Últimos 20)", f"{taxa_acerto:.1%}")
 else:
-    st.write("Nenhuma sugestão forte encontrada.")
+    st.warning("Nenhuma sugestão com confiança suficiente hoje.")
 
 
 
@@ -367,6 +397,7 @@ elif len(st.session_state.historico) == 0:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
