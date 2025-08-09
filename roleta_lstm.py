@@ -400,7 +400,7 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
         st.write(f"🔢 **Acertou (Regressão)?** {'✅' if acerto_regressao else '❌'}")
 
     # Estatísticas
-    acertos, erros = calcular_performance()
+acertos, erros = calcular_performance()
     st.sidebar.markdown(f"📊 **Total** | ✅ Acertos: {acertos} | ❌ Erros: {erros} | 🔁 Total: {acertos + erros}")
 
 elif len(st.session_state.historico) == 0:
@@ -408,6 +408,7 @@ elif len(st.session_state.historico) == 0:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
