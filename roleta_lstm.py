@@ -364,63 +364,57 @@ else:
 
 
 # --- AVALIAÇÃO DE DESEMPENHO ---
-# --- AVALIAÇÃO DE DESEMPENHO ---
-# --- AVALIAÇÃO DE DESEMPENHO ---
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
     try:
-        # Inicialização segura de todas variáveis
+        # Inicialização segura de todas as variáveis
         ultimo_numero = st.session_state.historico[-1]
         acerto_classificacao = False
         acerto_regressao = False
         numeros_sugeridos = []
         
-        # Verificação de sugestões de classificação
-        if 'sugestoes_com_vizinhos' in locals() and sugestoes_com_vizinhos:
+        # Verificação segura das sugestões
+        if 'sugestoes_com_vizinhos' in globals() and sugestoes_com_vizinhos:
             numeros_sugeridos = [num for num, _, _ in sugestoes_com_vizinhos]
             acerto_classificacao = ultimo_numero in numeros_sugeridos
         
-        # Verificação de sugestões de regressão
-        if 'sugestoes_regressao' in locals() and sugestoes_regressao:
-            acerto_regressao = ultimo_numero in sugestoes_regressao
+        # Verificação segura da regressão
+        if 'sugestoes_regressao' in globals():
+            acerto_regressao = ultimo_numero in sugestoes_regressao if sugestoes_regressao else False
         
         # Armazenamento do resultado
         st.session_state.resultados.append({
             'real': ultimo_numero,
             'previsto_class': numeros_sugeridos,
-            'previsto_reg': sugestoes_regressao,
+            'previsto_reg': sugestoes_regressao if 'sugestoes_regressao' in globals() else [],
             'acerto': acerto_classificacao
         })
         
         # Exibição dos resultados
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Classificação", 
-                     "✅" if acerto_classificacao else "❌", 
-                     f"Previu: {numeros_sugeridos or 'Nenhum'}")
-        with col2:
-            st.metric("Regressão", 
-                     "✅" if acerto_regressao else "❌",
-                     f"Previu: {sugestoes_regressao or 'Nenhum'}")
+        st.write(f"🔮 Último número: {ultimo_numero}")
+        if numeros_sugeridos:
+            st.write(f"🧠 IA Classificou: {numeros_sugeridos} → {'✅' if acerto_classificacao else '❌'}")
+        if 'sugestoes_regressao' in globals() and sugestoes_regressao:
+            st.write(f"📈 IA Regrediu: {sugestoes_regressao} → {'✅' if acerto_regressao else '❌'}")
         
-        # Cálculo e exibição de estatísticas
-        if st.session_state.resultados:
-            acertos = sum(1 for r in st.session_state.resultados if r['acerto'])
+        # Cálculo das estatísticas
+        if hasattr(st.session_state, 'resultados') and st.session_state.resultados:
+            acertos = sum(1 for r in st.session_state.resultados if isinstance(r, dict) and r.get('acerto', False))
             total = len(st.session_state.resultados)
-            st.sidebar.progress(acertos/total)
-            st.sidebar.markdown(f"""
-                **Estatísticas Atuais:**
-                ✅ Acertos: {acertos}  
-                ❌ Erros: {total - acertos}  
-                🎯 Precisão: {acertos/total:.1%}
-            """)
-            
+            if total > 0:
+                st.sidebar.markdown(f"""
+                    **Estatísticas:**
+                    - ✅ Acertos: {acertos}
+                    - ❌ Erros: {total - acertos}
+                    - 🎯 Precisão: {acertos/total:.1%}
+                """)
+
     except Exception as e:
-        st.error(f"Erro ao avaliar desempenho: {str(e)}")
+        st.error(f"Erro ao processar resultados: {str(e)}")
 
 elif not st.session_state.historico:
-    st.info("⏳ Insira o primeiro número para começar")
+    st.info("⏳ Histórico vazio. Insira números para começar.")
 else:
-    faltam = SEQUENCIA_ENTRADA + 2 - len(st.session_state.historico)
+    faltam = max(0, SEQUENCIA_ENTRADA + 2 - len(st.session_state.historico))
     st.info(f"📥 Insira mais {faltam} número(s) para ativar as previsões")
 
 
