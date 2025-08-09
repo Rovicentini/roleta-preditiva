@@ -248,10 +248,19 @@ def prever_proximo(modelo, scaler):
 def calcular_performance():
     if not hasattr(st.session_state, 'resultados') or len(st.session_state.resultados) == 0:
         return 0, 0
-        
-    # Pega os últimos 50 resultados para cálculo
+    
     resultados_recentes = st.session_state.resultados[-50:]
-    acertos = sum(resultados_recentes)
+    
+    # Versão segura que funciona com ambos os formatos
+    acertos = 0
+    for resultado in resultados_recentes:
+        if isinstance(resultado, dict):  # Para os resultados antigos (formato dicionário)
+            if resultado.get('acerto', False):
+                acertos += 1
+        else:  # Para os novos resultados (booleanos diretos)
+            if resultado:
+                acertos += 1
+                
     return acertos, len(resultados_recentes) - acertos
 
 
@@ -375,13 +384,15 @@ if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 2:
 
     acerto_classificacao = ultimo_real in numeros_sugeridos
 
-    st.session_state.resultados.append({
-        'real': ultimo_real,
-        'previsto': sugestoes_softmax,
-        'acerto': acerto_classificacao
-    })
+ # Substitua isso:
+st.session_state.resultados.append({
+    'real': ultimo_real,
+    'previsto': sugestoes_softmax,
+    'acerto': acerto_classificacao
+})
 
-    st.write(f"🎯 **Último número real:** {ultimo_real} | **Acertou (Classificação)?** {'✅' if acerto_classificacao else '❌'}")
+# Por isso (igual ao outro local):
+st.session_state.resultados.append(acerto_classificacao)
 
     # Avaliação Regressão
     if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
@@ -397,6 +408,7 @@ elif len(st.session_state.historico) == 0:
 
 else:
     st.info("ℹ️ Insira ao menos 11 números para iniciar a previsão com IA.")
+
 
 
 
