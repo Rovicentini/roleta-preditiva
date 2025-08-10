@@ -106,12 +106,12 @@ def preparar_dados(historico, sequencia=SEQUENCIA_ENTRADA):
         X_seq.append(seq)
         
         # Features adicionais
-        features = [
-            np.mean(seq),
-            np.std(seq),
-            historico.count(target)/len(historico) if len(historico) > 0 else 0,
-            sequencia_roleta.index(seq[-1]) if seq[-1] in sequencia_roleta else 0
-        ]
+features = [
+    float(np.mean(seq)),
+    float(np.std(seq)),
+    historico[-100:].count(target)/100 if len(historico) > 100 else 0,
+    sequencia_roleta.index(seq[-1]) if seq[-1] in sequencia_roleta else 0  # Adicionado
+]
         X_feat.append(features)
         y.append(target)
     
@@ -131,61 +131,38 @@ sugestoes_softmax = []
 
 
 def treinar_modelo_lstm(historico):
-    # 1. Limita os dados aos 150 últimos resultados (equilíbrio entre performance e qualidade)
-    dados_enriquecidos = aumentar_dados(historico[-150:]) if len(historico) > 150 else aumentar_dados(historico)
+    dados_enriquecidos = aumentar_dados(historico[-100:]) if len(historico) > 100 else aumentar_dados(historico)
     
-    # 2. Cache inteligente (só retreina se os dados mudarem significativamente)
-    @st.cache_resource(ttl=600, show_spinner=False, hash_funcs={"builtins.dict": lambda _: None})
+    @st.cache_resource(ttl=3600)
     def train_cached_model(_historico):
-        X, y = preparar_dados(_historico)
+        X, y = preparar_dados(_historico)  # Adicionado esta linha
         if X is None:
             return None
-
-        tscv = TimeSeriesSplit(n_splits=2)
-        best_model = None
-        best_val_loss = float('inf')
+            
+        # Modelo completo
+        input_seq = Input(shape=(SEQUENCIA_ENTRADA, 1))  # Adicionado
+        input_feat = Input(shape=(4,))  # Adicionado
         
-        for train_idx, val_idx in tscv.split(X[0]):
-            # Arquitetura do modelo (igual à original)
-            input_seq = Input(shape=(SEQUENCIA_ENTRADA, 1))
-            input_feat = Input(shape=(4,))
-            
-            lstm1 = LSTM(96, return_sequences=True)(input_seq)  # Reduzido de 128
-            attention = Attention()([lstm1, lstm1])
-            lstm2 = LSTM(48)(attention)  # Reduzido de 64
-            
-            dense1 = Dense(24, activation='relu')(input_feat)  # Reduzido de 32
-            
-            combined = Concatenate()([lstm2, dense1])
-            output = Dense(NUM_TOTAL, activation='softmax')(combined)
-            
-            model = Model(inputs=[input_seq, input_feat], outputs=output)
-            
-            model.compile(
-                optimizer=Adam(learning_rate=0.0007),  # Ajuste fino
-                loss='categorical_crossentropy',
-                metrics=['accuracy']
-            )
-            
-            history = model.fit(
-                [X[0][train_idx], X[1][train_idx]],
-                y[train_idx],
-                validation_data=([X[0][val_idx], X[1][val_idx]], y[val_idx]),
-                epochs=35,  # Ponto ideal entre 30 e 50
-                batch_size=24,  # Entre 16 e 32
-                verbose=0,
-                callbacks=[EarlyStopping(patience=4)]  # Equilíbrio
-            )
-            
-            current_val_loss = min(history.history['val_loss'])
-            if current_val_loss < best_val_loss:
-                best_val_loss = current_val_loss
-                best_model = model
-                
-        return best_model
+        lstm1 = LSTM(64, return_sequences=True)(input_seq)
+        attention = Attention()([lstm1, lstm1])  # Adicionado
+        lstm2 = LSTM(32)(attention)
+        dense1 = Dense(16, activation='relu')(input_feat)
+        
+        combined = Concatenate()([lstm2, dense1])  # Adicionado
+        output = Dense(NUM_TOTAL, activation='softmax')(combined)  # Adicionado
+        
+        model = Model(inputs=[input_seq, input_feat], outputs=output)  # Adicionado
+        model.compile(optimizer=Adam(learning_rate=0.001), loss='categorical_crossentropy')  # Adicionado
+        
+        history = model.fit(
+            [X[0], X[1]], y,  # Corrigido para usar X e y
+            epochs=20,
+            batch_size=32,
+            callbacks=[EarlyStopping(patience=3)]
+        )
+        return model  # Adicionado retorno
     
     return train_cached_model(dados_enriquecidos)
-
 
 
 # --- FUNÇÕES AUXILIARES ---
@@ -197,6 +174,27 @@ sequencia_roleta_europeia = [
     28, 12, 35, 3, 26
 ]
 
+# --- ANTES (função não existia) ---
+# Adicionar após sequencia_roleta_europeia
+
+# --- DEPOIS ---
+def aumentar_dados(historico):
+    """Versão otimizada para roleta"""
+    if len(historico) < 5:
+        return historico
+    
+    # Apenas gera pequenas variações dos dados originais
+    aumentados = list(historico)
+    
+    # Adiciona versão invertida
+    aumentados.extend(historico[::-1])
+    
+    # Adiciona ruído controlado (±1)
+    for n in historico:
+        novo_num = n + np.random.choice([-1, 0, 1])
+        aumentados.append(max(0, min(36, novo_num)))
+    
+    return aumentados
 def obter_vizinhos_roleta(numero, quantidade_vizinhos=3):
     numero = int(numero)
     if numero not in sequencia_roleta_europeia:
@@ -329,10 +327,11 @@ def calcular_performance():
     return acertos, len(recentes) - acertos
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=300)  # Cache de 5 minutos
 def fazer_previsao(_model, _seq, _feat):
-    """Faz previsões com cache de 1 minuto"""
-    return _model.predict([_seq, _feat], verbose=0)[0]
+    if _model is None:
+        return np.zeros(NUM_TOTAL)
+    return _model.predict([_seq, _feat], verbose=0, batch_size=1)[0]  # Batch_size otimizado
 
 # --- SIDEBAR ---
 
@@ -381,7 +380,8 @@ else:
   # CLASSIFICAÇÃO
 # CLASSIFICAÇÃO
 if len(st.session_state.historico) >= SEQUENCIA_ENTRADA + 1:
-    model_classificacao = treinar_modelo_lstm(st.session_state.historico)
+    with st.spinner('Analisando padrões...'):  # Feedback visual
+        model_classificacao = treinar_modelo_lstm(st.session_state.historico)
     if model_classificacao:
         # Prepara os dados de entrada
         seq_data = np.array(st.session_state.historico[-SEQUENCIA_ENTRADA:]).reshape(1, SEQUENCIA_ENTRADA, 1)
@@ -424,11 +424,22 @@ if sugestoes_com_vizinhos:
         st.session_state.resultados.append(acerto)
         
         # Corrigir para:
-if len(st.session_state.resultados) > 10:
-    ultimos_resultados = [r for r in st.session_state.resultados[-20:] if isinstance(r, dict)]
-    if ultimos_resultados:  # Verificar se a lista não está vazia
-        taxa_acerto = np.mean([r.get('acerto', False) for r in ultimos_resultados])
-        st.metric("Taxa de Acerto (Últimos 20)", f"{taxa_acerto:.1%}")
+if sugestoes_com_vizinhos:
+    for num, prob in sorted(sugestoes_com_vizinhos, key=lambda x: x[1], reverse=True)[:st.session_state.n_sugestoes]:
+        # ... (código de exibição das sugestões)
+    
+    # Validação em tempo real (mesmo nível do for)
+    if st.session_state.historico:
+        ultimo_numero = st.session_state.historico[-1]
+        acerto = any(num == ultimo_numero for num, _ in sugestoes_com_vizinhos)
+        st.session_state.resultados.append(acerto)
+        
+        # Verificação de performance (agora corretamente indentada)
+        if len(st.session_state.resultados) > 10:
+            ultimos_resultados = [r for r in st.session_state.resultados[-20:] if isinstance(r, dict)]
+            if ultimos_resultados:
+                taxa_acerto = np.mean([r.get('acerto', False) for r in ultimos_resultados])
+                st.metric("Taxa de Acerto (Últimos 20)", f"{taxa_acerto:.1%}")
             
 else:
     st.warning("Nenhuma sugestão com confiança suficiente hoje.")
@@ -488,6 +499,7 @@ elif not st.session_state.historico:
 else:
     faltam = max(0, SEQUENCIA_ENTRADA + 2 - len(st.session_state.historico))
     st.info(f"📥 Insira mais {faltam} número(s) para ativar as previsões")
+
 
 
 
