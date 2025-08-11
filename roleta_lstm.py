@@ -7,8 +7,6 @@ from tensorflow.keras.layers import Dense, LSTM, Input, Concatenate, Dropout, Ba
 from tensorflow.keras.optimizers import Adam
 from collections import deque
 import random
-import optuna
-from sklearn.preprocessing import MinMaxScaler
 import streamlit as st
 
 # Configurações globais
@@ -17,7 +15,7 @@ WHEEL_ORDER = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,
 SEQ_LEN = 20
 BATCH_SIZE = 64
 
-# Hiperparâmetros (serão otimizados pelo Optuna)
+# Hiperparâmetros
 LEARNING_RATE = 0.001
 GAMMA = 0.95
 EPSILON = 1.0
@@ -36,7 +34,8 @@ if 'stats' not in st.session_state:
         'balance': 1000,
         'bet_history': [],
         'wins': 0,
-        'losses': 0
+        'losses': 0,
+        'epsilon': EPSILON
     }
 
 class DQNAgent:
@@ -91,8 +90,8 @@ class DQNAgent:
     def remember(self, state, action, reward, next_state, done):
         st.session_state.memory.append((state, action, reward, next_state, done))
     
-    def act(self, state, epsilon):
-        if np.random.rand() <= epsilon:
+    def act(self, state):
+        if np.random.rand() <= st.session_state.stats['epsilon']:
             return random.randrange(NUM_TOTAL)
         seq = np.array(state[0]).reshape(1, SEQ_LEN, 1)
         feat = np.array([state[1]])
@@ -118,35 +117,17 @@ class DQNAgent:
             target_f[0][action] = target
             self.model.fit([seq, feat], target_f, epochs=1, verbose=0)
 
-def optimize_hyperparameters(trial):
-    """Função para otimização com Optuna"""
-    global LEARNING_RATE, GAMMA, EPSILON_DECAY
-    
-    LEARNING_RATE = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
-    GAMMA = trial.suggest_float('gamma', 0.8, 0.99)
-    EPSILON_DECAY = trial.suggest_float('epsilon_decay', 0.9, 0.999)
-    
-    # Simulação para avaliação
-    agent = DQNAgent()
-    # ... (adicionar lógica de avaliação)
-    return accuracy_metric  # Retornar métrica a ser maximizada
-
 def clear_input():
     st.session_state.last_input = st.session_state.current_number
     st.session_state.current_number = ""
 
 # Interface Streamlit
 st.set_page_config(layout="wide")
-st.title("🎰 Roleta AI Avançada - DQN + Otimização")
+st.title("🎰 Roleta AI Avançada - DQN")
 
 # Controles
 with st.sidebar:
     st.header("Controle")
-    if st.button("Otimizar Hiperparâmetros"):
-        study = optuna.create_study(direction='maximize')
-        study.optimize(optimize_hyperparameters, n_trials=50)
-        st.success(f"Melhores parâmetros: {study.best_params}")
-    
     if st.button("Reiniciar Sistema"):
         st.session_state.history = []
         st.session_state.model = None
@@ -155,7 +136,8 @@ with st.sidebar:
             'balance': 1000,
             'bet_history': [],
             'wins': 0,
-            'losses': 0
+            'losses': 0,
+            'epsilon': EPSILON
         }
 
 # Entrada de dados
@@ -187,8 +169,8 @@ with st.form("input_form", clear_on_submit=True):
                     agent.get_features(st.session_state.history[-SEQ_LEN:])
                 )
                 
-                # Simular recompensa (implementar lógica real)
-                reward = 10 if num == np.random.randint(0, 37) else -1
+                # Calcular recompensa
+                reward = 35 if num == np.random.choice(top_indices) else -1  # Simulação
                 done = False
                 
                 agent.remember(state, num, reward, next_state, done)
@@ -197,10 +179,13 @@ with st.form("input_form", clear_on_submit=True):
                 # Atualizar estatísticas
                 if reward > 0:
                     st.session_state.stats['wins'] += 1
-                    st.session_state.stats['balance'] += 35  # Pagamento roleta
+                    st.session_state.stats['balance'] += reward
                 else:
                     st.session_state.stats['losses'] += 1
-                    st.session_state.stats['balance'] -= 1
+                    st.session_state.stats['balance'] += reward
+                
+                # Decaimento do epsilon
+                st.session_state.stats['epsilon'] = max(EPSILON_MIN, st.session_state.stats['epsilon'] * EPSILON_DECAY)
 
 # Visualização
 col1, col2 = st.columns([3, 2])
@@ -238,19 +223,21 @@ with col2:
     st.subheader("Status do Sistema")
     st.metric("Saldo", f"R$ {st.session_state.stats['balance']:.2f}")
     st.metric("Vitórias/Perdas", f"{st.session_state.stats['wins']}/{st.session_state.stats['losses']}")
+    st.metric("Exploração (Epsilon)", f"{st.session_state.stats['epsilon']:.2f}")
     
     st.write("### Histórico Recente")
     if st.session_state.history:
         st.write(st.session_state.history[-10:])
     
-    st.write("### Hiperparâmetros Atuais")
+    st.write("### Hiperparâmetros")
     st.json({
         "Taxa de Aprendizado": LEARNING_RATE,
         "Fator Gamma": GAMMA,
+        "Epsilon Mínimo": EPSILON_MIN,
         "Decaimento Epsilon": EPSILON_DECAY
     })
 
-# Otimização contínua (executar em background)
+# Otimização contínua
 if st.session_state.model and len(st.session_state.history) > 100:
     agent = st.session_state.model
     agent.replay(BATCH_SIZE)
