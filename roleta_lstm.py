@@ -37,6 +37,8 @@ if 'stats' not in st.session_state:
         'losses': 0,
         'epsilon': EPSILON
     }
+if 'current_number' not in st.session_state:
+    st.session_state.current_number = ""
 
 class DQNAgent:
     def __init__(self):
@@ -117,10 +119,6 @@ class DQNAgent:
             target_f[0][action] = target
             self.model.fit([seq, feat], target_f, epochs=1, verbose=0)
 
-def clear_input():
-    st.session_state.last_input = st.session_state.current_number
-    st.session_state.current_number = ""
-
 # Interface Streamlit
 st.set_page_config(layout="wide")
 st.title("🎰 Roleta AI Avançada - DQN")
@@ -139,19 +137,20 @@ with st.sidebar:
             'losses': 0,
             'epsilon': EPSILON
         }
+        st.session_state.current_number = ""
 
 # Entrada de dados
-with st.form("input_form", clear_on_submit=True):
-    num = st.number_input("Número sorteado (0-36):", 
-                         min_value=0, 
-                         max_value=36, 
-                         key="current_number",
-                         on_change=clear_input)
-    
-    if st.form_submit_button("Registrar"):
-        if 'last_input' in st.session_state and st.session_state.last_input is not None:
-            num = int(st.session_state.last_input)
+num = st.number_input("Número sorteado (0-36):", 
+                     min_value=0, 
+                     max_value=36, 
+                     key="current_number")
+
+if st.button("Registrar"):
+    if st.session_state.current_number != "":
+        try:
+            num = int(st.session_state.current_number)
             st.session_state.history.append(num)
+            st.session_state.current_number = ""  # Limpa o campo
             
             # Inicializar agente se necessário
             if st.session_state.model is None:
@@ -169,8 +168,14 @@ with st.form("input_form", clear_on_submit=True):
                     agent.get_features(st.session_state.history[-SEQ_LEN:])
                 )
                 
+                # Obter Q-values para cálculo da recompensa
+                seq = np.array(next_state[0]).reshape(1, SEQ_LEN, 1)
+                feat = np.array([next_state[1]])
+                q_values = agent.model.predict([seq, feat], verbose=0)[0]
+                top_indices = np.argsort(q_values)[-5:][::-1]
+                
                 # Calcular recompensa
-                reward = 35 if num == np.random.choice(top_indices) else -1  # Simulação
+                reward = 35 if num in top_indices[:3] else -1
                 done = False
                 
                 agent.remember(state, num, reward, next_state, done)
@@ -186,6 +191,9 @@ with st.form("input_form", clear_on_submit=True):
                 
                 # Decaimento do epsilon
                 st.session_state.stats['epsilon'] = max(EPSILON_MIN, st.session_state.stats['epsilon'] * EPSILON_DECAY)
+                
+        except ValueError:
+            st.error("Por favor, insira um número válido entre 0 e 36")
 
 # Visualização
 col1, col2 = st.columns([3, 2])
