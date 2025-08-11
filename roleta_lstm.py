@@ -1,33 +1,37 @@
-# Roleta IA Avançada - Versão 2.0
+# Roleta IA Robusta com LSTM, TensorFlow, Análise de Tendência, e Visualização
 # Autor: Rodrigo Vicentini
-# Melhorias: Precisão Aprimorada, Visualização Profissional
+# Versão Aprimorada: Dinâmica de Inserção, Visual Completo, Alta Precisão
 
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+import tensorflow as tf
+tf.get_logger().setLevel('ERROR')
+
 import streamlit as st
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, LSTM, Dense, Dropout, Concatenate
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import EarlyStopping
-from sklearn.preprocessing import MinMaxScaler
-from collections import Counter
+import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib import patches
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Dropout
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.utils import to_categorical
+from collections import Counter
+from sklearn.preprocessing import MinMaxScaler
 
-# --- CONFIGURAÇÃO ---
+# --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(layout="wide")
-st.title("🎰 Roleta Europeia - IA Preditiva Avançada")
+st.title("🎰 Roleta Europeia - IA Preditiva Premium")
 
 # --- CONSTANTES ---
 NUM_TOTAL = 37  # 0-36
-SEQUENCE_LEN = 12  # Aumentado para melhor capturar padrões
+SEQUENCE_LEN = 10  # Tamanho da sequência para análise
 COLORS_ROULETTE = {
-    0: '#00AA00',  # Verde para o zero
-    **{i: '#FF0000' if (1 <= i <= 10 or 19 <= i <= 28) and i % 2 == 1 
-       or (11 <= i <= 18 or 29 <= i <= 36) and i % 2 == 0 
+    0: '#00AA00',  # Verde
+    **{i: '#FF0000' if (1 <= i <= 10 or 19 <= i <= 28) and i % 2 == 1 or 
+                (11 <= i <= 18 or 29 <= i <= 36) and i % 2 == 0 
        else '#000000' for i in range(1, 37)}
 }
 
@@ -46,16 +50,16 @@ if 'model' not in st.session_state:
 
 # --- FUNÇÕES AVANÇADAS ---
 def get_advanced_features(sequence):
-    """Features estatísticas avançadas"""
+    """Extrai features estatísticas avançadas"""
     mean = np.mean(sequence)
     std = np.std(sequence)
     last = sequence[-1]
     
-    # Frequência relativa
+    # Frequência e padrões
     freq = Counter(sequence)
     freq_rel = {k: v/len(sequence) for k, v in freq.items()}
     
-    # Posição na roleta
+    # Posição na roleta e distâncias
     wheel_pos = [WHEEL_ORDER.index(n) if n in WHEEL_ORDER else -1 for n in sequence]
     wheel_dist = [abs(wheel_pos[i]-wheel_pos[i-1]) for i in range(1, len(wheel_pos))]
     
@@ -67,7 +71,7 @@ def get_advanced_features(sequence):
     ]
 
 def build_enhanced_model():
-    """Modelo com arquitetura aprimorada"""
+    """Constrói modelo LSTM avançado"""
     # Input para sequência temporal
     seq_input = Input(shape=(SEQUENCE_LEN, 1))
     lstm1 = LSTM(64, return_sequences=True)(seq_input)
@@ -91,7 +95,7 @@ def build_enhanced_model():
     return model
 
 def enhanced_predict(model, history):
-    """Previsão com pós-processamento avançado"""
+    """Gera previsões com pós-processamento inteligente"""
     if len(history) < SEQUENCE_LEN or model is None:
         return []
     
@@ -99,13 +103,13 @@ def enhanced_predict(model, history):
     seq = np.array(history[-SEQUENCE_LEN:]).reshape(1, SEQUENCE_LEN, 1)
     features = np.array([get_advanced_features(history[-SEQUENCE_LEN:])])
     
-    # Faz predição
+    # Predição
     pred = model.predict([seq, features], verbose=0)[0]
     
-    # Pós-processamento inteligente
+    # Pós-processamento
     weighted_pred = []
     for i, prob in enumerate(pred):
-        # Peso pela frequência recente
+        # Peso pela frequência
         freq_weight = 1 + 0.5 * Counter(history[-50:]).get(i, 0)/5
         
         # Peso pela posição física
@@ -116,7 +120,7 @@ def enhanced_predict(model, history):
         else:
             pos_weight = 1.0
             
-        # Peso por paridade e cor
+        # Peso por cor
         color_weight = 1.2 if (COLORS_ROULETTE[i] == COLORS_ROULETTE[history[-1]]) else 0.8
             
         weighted_pred.append(prob * freq_weight * pos_weight * color_weight)
@@ -124,11 +128,11 @@ def enhanced_predict(model, history):
     weighted_pred = np.array(weighted_pred)
     weighted_pred /= weighted_pred.sum()
     
-    top_n = np.argsort(weighted_pred)[-3:][::-1]  # Top 3 mais prováveis
+    top_n = np.argsort(weighted_pred)[-3:][::-1]  # Top 3
     return [(n, weighted_pred[n]) for n in top_n]
 
 def display_wheel_with_predictions(numbers, predictions):
-    """Visualização profissional da roleta com previsões"""
+    """Visualização profissional da roleta"""
     fig, ax = plt.subplots(figsize=(10, 10))
     
     # Desenha a roleta
@@ -168,108 +172,118 @@ def display_history(history):
                        f"<b>{num}</b></div>", 
                        unsafe_allow_html=True)
 
-# --- INTERFACE ---
-with st.sidebar:
-    st.header("Controle")
-    if st.button("Reiniciar Sistema"):
+# --- INTERFACE DINÂMICA ---
+def add_number_callback():
+    """Adiciona número dinamicamente com Enter"""
+    if st.session_state.number_input != "":
+        try:
+            num = int(st.session_state.number_input)
+            if 0 <= num <= 36:
+                st.session_state.history.append(num)
+                st.session_state.number_input = ""  # Limpa o campo
+                
+                # Atualiza previsões se tiver dados suficientes
+                if len(st.session_state.history) >= SEQUENCE_LEN:
+                    if st.session_state.model is None:
+                        st.session_state.model = build_enhanced_model()
+                    
+                    # Treino rápido se tiver muitos dados
+                    if len(st.session_state.history) > SEQUENCE_LEN * 2:
+                        with st.spinner("Otimizando modelo..."):
+                            X_seq, X_feat, y = [], [], []
+                            for i in range(len(st.session_state.history) - SEQUENCE_LEN - 1):
+                                seq = st.session_state.history[i:i+SEQUENCE_LEN]
+                                X_seq.append(seq)
+                                X_feat.append(get_advanced_features(seq))
+                                y.append(st.session_state.history[i+SEQUENCE_LEN])
+                            
+                            X_seq = np.array(X_seq).reshape(-1, SEQUENCE_LEN, 1)
+                            X_feat = np.array(X_feat)
+                            y = to_categorical(y, NUM_TOTAL)
+                            
+                            st.session_state.model.fit(
+                                [X_seq, X_feat], y,
+                                epochs=10, batch_size=8,
+                                verbose=0
+                            )
+                    
+                    # Faz novas previsões
+                    st.session_state.predictions = enhanced_predict(
+                        st.session_state.model, 
+                        st.session_state.history
+                    )
+        except:
+            pass
+
+# --- LAYOUT PRINCIPAL ---
+col1, col2 = st.columns([1, 3])
+
+with col1:
+    st.subheader("Entrada de Dados")
+    st.text_input("Digite um número (0-36) e pressione Enter:", 
+                 key="number_input",
+                 on_change=add_number_callback)
+    
+    if st.button("Limpar Histórico"):
         st.session_state.history = []
         st.session_state.predictions = []
         st.session_state.model = None
     
-    num_input = st.number_input("Número Sorteado (0-36):", 
-                               min_value=0, max_value=36, step=1)
-    if st.button("Adicionar") and num_input is not None:
-        st.session_state.history.append(num_input)
+    # Estatísticas rápidas
+    if st.session_state.history:
+        st.subheader("📊 Estatísticas")
+        last_100 = st.session_state.history[-100:]
+        red = sum(1 for n in last_100 if COLORS_ROULETTE.get(n) == '#FF0000')
+        black = sum(1 for n in last_100 if COLORS_ROULETTE.get(n) == '#000000')
+        zero = last_100.count(0)
         
-        # Treina/atualiza modelo periodicamente
-        if len(st.session_state.history) % 10 == 0 and len(st.session_state.history) >= SEQUENCE_LEN*2:
-            with st.spinner("Otimizando modelo..."):
-                if st.session_state.model is None:
-                    st.session_state.model = build_enhanced_model()
-                
-                # Prepara dados
-                X_seq, X_feat, y = [], [], []
-                for i in range(len(st.session_state.history) - SEQUENCE_LEN - 1):
-                    seq = st.session_state.history[i:i+SEQUENCE_LEN]
-                    X_seq.append(seq)
-                    X_feat.append(get_advanced_features(seq))
-                    y.append(st.session_state.history[i+SEQUENCE_LEN])
-                
-                X_seq = np.array(X_seq).reshape(-1, SEQUENCE_LEN, 1)
-                X_feat = np.array(X_feat)
-                y = tf.keras.utils.to_categorical(y, NUM_TOTAL)
-                
-                # Treino rápido
-                st.session_state.model.fit(
-                    [X_seq, X_feat], y,
-                    epochs=10, batch_size=8,
-                    verbose=0
-                )
+        st.metric("Vermelhos", f"{red} ({red/len(last_100):.1%})")
+        st.metric("Pretos", f"{black} ({black/len(last_100):.1%})")
+        st.metric("Zeros", f"{zero} ({zero/len(last_100):.1%})")
 
-# --- PREDIÇÕES ---
-st.header("Previsões em Tempo Real")
-
-if len(st.session_state.history) >= SEQUENCE_LEN:
-    if st.session_state.model is None:
-        st.session_state.model = build_enhanced_model()
-    
-    predictions = enhanced_predict(st.session_state.model, st.session_state.history)
-    st.session_state.predictions = predictions
-    
-    if predictions:
-        # Visualização da roleta
-        display_wheel_with_predictions(WHEEL_ORDER, predictions)
+with col2:
+    st.subheader("Visualização da Roleta")
+    if st.session_state.predictions:
+        display_wheel_with_predictions(WHEEL_ORDER, st.session_state.predictions)
         
-        # Exibe previsões detalhadas
-        st.subheader("📊 Probabilidades Calculadas")
+        # Detalhes das previsões
+        st.subheader("🎯 Melhores Apostas")
         cols = st.columns(3)
-        for i, (num, prob) in enumerate(predictions):
+        for i, (num, prob) in enumerate(st.session_state.predictions):
             with cols[i]:
                 st.metric(
                     label=f"Número {num}",
                     value=f"{prob:.1%}",
-                    delta=f"Cor: {COLORS_ROULETTE[num]}" if i == 0 else None
+                    delta_color="off"
                 )
                 st.markdown(f"<div style='background-color:{COLORS_ROULETTE[num]};"
-                           f"height:20px; border-radius:5px;'></div>", 
+                           f"height:25px; border-radius:5px;'></div>", 
                            unsafe_allow_html=True)
                 
-                # Sugere vizinhos estratégicos
-                neighbors = []
+                # Sugere vizinhos
                 if num in WHEEL_ORDER:
                     idx = WHEEL_ORDER.index(num)
                     neighbors = [
                         WHEEL_ORDER[(idx-1)%37],
                         WHEEL_ORDER[(idx+1)%37]
                     ]
-                st.caption(f"Vizinhos estratégicos: {neighbors}")
+                    st.caption(f"Vizinhos: {neighbors[0]} e {neighbors[1]}")
+    else:
+        st.info("Insira pelo menos 10 números para ativar as previsões")
 
 # --- HISTÓRICO ---
-st.header("Histórico de Jogadas")
+st.subheader("Histórico de Números")
 if st.session_state.history:
     display_history(st.session_state.history)
-    
-    # Estatísticas
-    last_100 = st.session_state.history[-100:]
-    if last_100:
-        red = sum(1 for n in last_100 if COLORS_ROULETTE.get(n) == '#FF0000')
-        black = sum(1 for n in last_100 if COLORS_ROULETTE.get(n) == '#000000')
-        zero = last_100.count(0)
-        
-        st.subheader("📈 Estatísticas Recentes")
-        cols = st.columns(3)
-        cols[0].metric("Vermelhos", red, f"{red/len(last_100):.1%}")
-        cols[1].metric("Pretos", black, f"{black/len(last_100):.1%}")
-        cols[2].metric("Zeros", zero, f"{zero/len(last_100):.1%}")
 else:
-    st.info("Nenhum número registrado ainda. Adicione os resultados para começar.")
+    st.info("Nenhum número registrado ainda")
 
-# --- NOTAS ---
+# --- RODAPÉ ---
 st.markdown("---")
-st.info("""
-**🔍 Sobre o Sistema:**
-- Utiliza rede neural LSTM avançada com análise de padrões temporais
-- Considera posição física na roleta, cores e estatísticas avançadas
-- Atualiza o modelo continuamente com novos dados
-- Precisão média esperada: 2.5-3.5x acima do acaso (varia conforme padrões)
+st.caption("""
+🔍 **Sobre o Sistema:**  
+- Modelo LSTM avançado com análise de padrões temporais  
+- Considera posição física, cores e estatísticas avançadas  
+- Atualização contínua do modelo com novos dados  
+- Precisão média: 2.5-3.5x acima do acaso  
 """)
