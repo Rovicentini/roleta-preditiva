@@ -102,7 +102,7 @@ def get_advanced_features(sequence):
         last_pos = WHEEL_ORDER.index(last)
         second_last_pos = WHEEL_ORDER.index(second_last)
         wheel_speed = (last_pos - second_last_pos) % 37
-        deceleration = abs(wheel_speed - ((second_last_pos - WHEEL_ORDER.index(sequence[-3])) % 37) if len(sequence) > 2 else 0
+        deceleration = abs(wheel_speed - ((second_last_pos - WHEEL_ORDER.index(sequence[-3])) % 37)) if len(sequence) > 2 else 0
     else:
         wheel_speed = 0
         deceleration = 0
@@ -324,3 +324,4 @@ if st.session_state.model and len(st.session_state.history) > 50:
             with st.spinner("REOTIMIZANDO REDE NEURAL..."):
                 st.session_state.model = build_deep_learning_model()
                 st.success("Modelo reforçado com sucesso!")
+
