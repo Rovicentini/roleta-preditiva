@@ -184,7 +184,7 @@ class DQNAgent:
         model = tf.keras.Sequential([
             Dense(256, activation='relu', input_shape=(self.state_size,)),
             BatchNormalization(),
-            Dropout(0.3),
+            Dropout(0.3, seed=None),
             Dense(128, activation='relu'),
             Dense(self.action_size, activation='linear')
         ])
@@ -492,3 +492,4 @@ with st.expander("💾 Salvar / Carregar Modelos"):
 
 st.markdown("---")
 st.caption("Notas: este é um ambiente de pesquisa. Não há garantias de lucro. Ajuste BET_AMOUNT, políticas de recompensa e parâmetros de treino conforme seu experimento.")
+
