@@ -2,7 +2,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Dense, LSTM, Input, Concatenate, Dropout, BatchNormalization
 from tensorflow.keras.optimizers import Adam
 from collections import deque
@@ -37,8 +37,8 @@ if 'stats' not in st.session_state:
         'losses': 0,
         'epsilon': EPSILON
     }
-if 'current_number' not in st.session_state:
-    st.session_state.current_number = ""
+if 'current_num' not in st.session_state:
+    st.session_state.current_num = 0  # Valor inicial válido
 
 class DQNAgent:
     def __init__(self):
@@ -137,63 +137,65 @@ with st.sidebar:
             'losses': 0,
             'epsilon': EPSILON
         }
-        st.session_state.current_number = ""
+        st.session_state.current_num = 0
 
-# Entrada de dados
-num = st.number_input("Número sorteado (0-36):", 
-                     min_value=0, 
-                     max_value=36, 
-                     key="current_number")
+# Entrada de dados - Versão simplificada e robusta
+try:
+    current_num = st.number_input(
+        "Número sorteado (0-36):",
+        min_value=0,
+        max_value=36,
+        value=st.session_state.current_num,
+        key="num_input"
+    )
+    st.session_state.current_num = current_num  # Mantém o valor atual
+except:
+    st.session_state.current_num = 0
+    st.error("Valor inválido. Redefinindo para 0.")
 
-if st.button("Registrar"):
-    if st.session_state.current_number != "":
-        try:
-            num = int(st.session_state.current_number)
-            st.session_state.history.append(num)
-            st.session_state.current_number = ""  # Limpa o campo
-            
-            # Inicializar agente se necessário
-            if st.session_state.model is None:
-                st.session_state.model = DQNAgent()
-            
-            # Processar aprendizado
-            if len(st.session_state.history) > SEQ_LEN:
-                agent = st.session_state.model
-                state = (
-                    st.session_state.history[-SEQ_LEN-1:-1],
-                    agent.get_features(st.session_state.history[-SEQ_LEN-1:-1])
-                )
-                next_state = (
-                    st.session_state.history[-SEQ_LEN:],
-                    agent.get_features(st.session_state.history[-SEQ_LEN:])
-                )
-                
-                # Obter Q-values para cálculo da recompensa
-                seq = np.array(next_state[0]).reshape(1, SEQ_LEN, 1)
-                feat = np.array([next_state[1]])
-                q_values = agent.model.predict([seq, feat], verbose=0)[0]
-                top_indices = np.argsort(q_values)[-5:][::-1]
-                
-                # Calcular recompensa
-                reward = 35 if num in top_indices[:3] else -1
-                done = False
-                
-                agent.remember(state, num, reward, next_state, done)
-                agent.replay(BATCH_SIZE)
-                
-                # Atualizar estatísticas
-                if reward > 0:
-                    st.session_state.stats['wins'] += 1
-                    st.session_state.stats['balance'] += reward
-                else:
-                    st.session_state.stats['losses'] += 1
-                    st.session_state.stats['balance'] += reward
-                
-                # Decaimento do epsilon
-                st.session_state.stats['epsilon'] = max(EPSILON_MIN, st.session_state.stats['epsilon'] * EPSILON_DECAY)
-                
-        except ValueError:
-            st.error("Por favor, insira um número válido entre 0 e 36")
+if st.button("Registrar Número"):
+    num = st.session_state.current_num
+    st.session_state.history.append(num)
+    
+    # Inicializar agente se necessário
+    if st.session_state.model is None:
+        st.session_state.model = DQNAgent()
+    
+    # Processar aprendizado quando tiver dados suficientes
+    if len(st.session_state.history) > SEQ_LEN:
+        agent = st.session_state.model
+        state = (
+            st.session_state.history[-SEQ_LEN-1:-1],
+            agent.get_features(st.session_state.history[-SEQ_LEN-1:-1])
+        )
+        next_state = (
+            st.session_state.history[-SEQ_LEN:],
+            agent.get_features(st.session_state.history[-SEQ_LEN:])
+        )
+        
+        # Obter Q-values para cálculo da recompensa
+        seq = np.array(next_state[0]).reshape(1, SEQ_LEN, 1)
+        feat = np.array([next_state[1]])
+        q_values = agent.model.predict([seq, feat], verbose=0)[0]
+        top_indices = np.argsort(q_values)[-5:][::-1]
+        
+        # Calcular recompensa
+        reward = 35 if num in top_indices[:3] else -1
+        done = False
+        
+        agent.remember(state, num, reward, next_state, done)
+        agent.replay(BATCH_SIZE)
+        
+        # Atualizar estatísticas
+        if reward > 0:
+            st.session_state.stats['wins'] += 1
+            st.session_state.stats['balance'] += reward
+        else:
+            st.session_state.stats['losses'] += 1
+            st.session_state.stats['balance'] += reward
+        
+        # Decaimento do epsilon
+        st.session_state.stats['epsilon'] = max(EPSILON_MIN, st.session_state.stats['epsilon'] * EPSILON_DECAY)
 
 # Visualização
 col1, col2 = st.columns([3, 2])
