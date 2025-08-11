@@ -1,341 +1,257 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-import streamlit as st
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Dropout, Attention, BatchNormalization
-from tensorflow.keras.optimizers import Nadam
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-from tensorflow.keras.regularizers import l2
-from collections import Counter
+from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.layers import Dense, LSTM, Input, Concatenate, Dropout, BatchNormalization
+from tensorflow.keras.optimizers import Adam
+from collections import deque
+import random
+import optuna
 from sklearn.preprocessing import MinMaxScaler
+import streamlit as st
 
-# Configuração do TensorFlow para máxima performance
-tf.config.optimizer.set_jit(True)
-physical_devices = tf.config.list_physical_devices('GPU')
-if physical_devices:
-    tf.config.experimental.set_memory_growth(physical_devices[0], True)
-
-# --- CONSTANTES AVANÇADAS ---
+# Configurações globais
 NUM_TOTAL = 37  # 0-36
-SEQUENCE_LEN = 20  # Janela maior para capturar padrões complexos
 WHEEL_ORDER = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26]
-WHEEL_DISTANCE = [[min(abs(i-j), 37-abs(i-j)) for j in range(37)] for i in range(37)]
+SEQ_LEN = 20
+BATCH_SIZE = 64
 
-# --- INICIALIZAÇÃO DO ESTADO ---
+# Hiperparâmetros (serão otimizados pelo Optuna)
+LEARNING_RATE = 0.001
+GAMMA = 0.95
+EPSILON = 1.0
+EPSILON_MIN = 0.01
+EPSILON_DECAY = 0.995
+
+# Inicialização do estado
 if 'history' not in st.session_state:
     st.session_state.history = []
 if 'model' not in st.session_state:
     st.session_state.model = None
+if 'memory' not in st.session_state:
+    st.session_state.memory = deque(maxlen=2000)
 if 'stats' not in st.session_state:
-    st.session_state.stats = {'acertos': 0, 'total': 0, 'streak': 0, 'max_streak': 0}
-if 'last_input' not in st.session_state:
-    st.session_state.last_input = None
+    st.session_state.stats = {
+        'balance': 1000,
+        'bet_history': [],
+        'wins': 0,
+        'losses': 0
+    }
 
-# Função para limpar o campo de entrada
+class DQNAgent:
+    def __init__(self):
+        self.model = self._build_hybrid_model()
+        self.target_model = self._build_hybrid_model()
+        self.update_target_model()
+        
+    def _build_hybrid_model(self):
+        """Modelo híbrido LSTM + Dense para Q-Learning"""
+        # Input para sequência temporal
+        seq_input = Input(shape=(SEQ_LEN, 1))
+        lstm = LSTM(128, return_sequences=True)(seq_input)
+        lstm = LSTM(64)(lstm)
+        
+        # Input para features adicionais
+        feat_input = Input(shape=(6,))
+        dense = Dense(64, activation='relu')(feat_input)
+        
+        # Combinação
+        combined = Concatenate()([lstm, dense])
+        x = Dense(128, activation='relu')(combined)
+        x = Dropout(0.3)(x)
+        x = Dense(64, activation='relu')(x)
+        output = Dense(NUM_TOTAL, activation='linear')(x)
+        
+        model = Model(inputs=[seq_input, feat_input], outputs=output)
+        model.compile(loss='mse', optimizer=Adam(learning_rate=LEARNING_RATE))
+        return model
+    
+    def update_target_model(self):
+        self.target_model.set_weights(self.model.get_weights())
+    
+    def get_features(self, history):
+        """Extrai features avançadas do histórico"""
+        if len(history) < 2:
+            return [0]*6
+        
+        last = history[-1]
+        mean = np.mean(history[-10:]) if len(history) >= 10 else np.mean(history)
+        std = np.std(history[-10:]) if len(history) >= 10 else np.std(history)
+        
+        return [
+            mean/36,
+            std/18,
+            history.count(last)/len(history),
+            (max(history) - min(history))/36,
+            len(set(history))/len(history),
+            1 if last == history[-2] else 0
+        ]
+    
+    def remember(self, state, action, reward, next_state, done):
+        st.session_state.memory.append((state, action, reward, next_state, done))
+    
+    def act(self, state, epsilon):
+        if np.random.rand() <= epsilon:
+            return random.randrange(NUM_TOTAL)
+        seq = np.array(state[0]).reshape(1, SEQ_LEN, 1)
+        feat = np.array([state[1]])
+        act_values = self.model.predict([seq, feat], verbose=0)
+        return np.argmax(act_values[0])
+    
+    def replay(self, batch_size):
+        if len(st.session_state.memory) < batch_size:
+            return
+        
+        minibatch = random.sample(st.session_state.memory, batch_size)
+        
+        for state, action, reward, next_state, done in minibatch:
+            target = reward
+            if not done:
+                next_seq = np.array(next_state[0]).reshape(1, SEQ_LEN, 1)
+                next_feat = np.array([next_state[1]])
+                target = reward + GAMMA * np.amax(self.target_model.predict([next_seq, next_feat], verbose=0)[0])
+            
+            seq = np.array(state[0]).reshape(1, SEQ_LEN, 1)
+            feat = np.array([state[1]])
+            target_f = self.model.predict([seq, feat], verbose=0)
+            target_f[0][action] = target
+            self.model.fit([seq, feat], target_f, epochs=1, verbose=0)
+
+def optimize_hyperparameters(trial):
+    """Função para otimização com Optuna"""
+    global LEARNING_RATE, GAMMA, EPSILON_DECAY
+    
+    LEARNING_RATE = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
+    GAMMA = trial.suggest_float('gamma', 0.8, 0.99)
+    EPSILON_DECAY = trial.suggest_float('epsilon_decay', 0.9, 0.999)
+    
+    # Simulação para avaliação
+    agent = DQNAgent()
+    # ... (adicionar lógica de avaliação)
+    return accuracy_metric  # Retornar métrica a ser maximizada
+
 def clear_input():
     st.session_state.last_input = st.session_state.current_number
     st.session_state.current_number = ""
 
-# --- ARQUITETURA NEURAL PROFUNDA ---
-def build_deep_learning_model():
-    """Constrói um modelo neural de última geração para previsão de roleta"""
-    # Camada de entrada para sequência temporal
-    seq_input = Input(shape=(SEQUENCE_LEN, 1), name='sequence_input')
-    
-    # Rede LSTM profunda com atenção
-    lstm1 = LSTM(256, return_sequences=True, 
-                kernel_regularizer=l2(0.001),
-                recurrent_regularizer=l2(0.001))(seq_input)
-    lstm1 = BatchNormalization()(lstm1)
-    lstm1 = Dropout(0.4)(lstm1)
-    
-    lstm2 = LSTM(128, return_sequences=True)(lstm1)
-    lstm2 = BatchNormalization()(lstm2)
-    
-    # Mecanismo de atenção
-    attention = Attention(use_scale=True)([lstm2, lstm2])
-    lstm3 = LSTM(64)(attention)
-    
-    # Camada para features avançadas
-    feat_input = Input(shape=(8,), name='features_input')
-    dense_feat = Dense(64, activation='swish')(feat_input)
-    dense_feat = BatchNormalization()(dense_feat)
-    dense_feat = Dropout(0.3)(dense_feat)
-    
-    # Combinação profunda
-    combined = Concatenate()([lstm3, dense_feat])
-    
-    # Camadas densas profundas
-    dense1 = Dense(256, activation='swish', 
-                  kernel_regularizer=l2(0.001))(combined)
-    dense1 = BatchNormalization()(dense1)
-    dense1 = Dropout(0.5)(dense1)
-    
-    dense2 = Dense(128, activation='swish')(dense1)
-    dense2 = BatchNormalization()(dense2)
-    
-    # Saída com softmax temperature
-    output = Dense(NUM_TOTAL, activation='softmax')(dense2)
-    
-    model = Model(inputs=[seq_input, feat_input], outputs=output)
-    
-    # Otimizador avançado com warmup
-    optimizer = Nadam(learning_rate=0.0005, 
-                     clipnorm=1.0,
-                     beta_1=0.9, 
-                     beta_2=0.999)
-    
-    model.compile(optimizer=optimizer,
-                 loss='categorical_crossentropy',
-                 metrics=['accuracy', 
-                         tf.keras.metrics.TopKCategoricalAccuracy(k=3)])
-    return model
+# Interface Streamlit
+st.set_page_config(layout="wide")
+st.title("🎰 Roleta AI Avançada - DQN + Otimização")
 
-def get_advanced_features(sequence):
-    """Extrai features estatísticas avançadas com física da roleta"""
-    if len(sequence) < 2:
-        return [0]*8
+# Controles
+with st.sidebar:
+    st.header("Controle")
+    if st.button("Otimizar Hiperparâmetros"):
+        study = optuna.create_study(direction='maximize')
+        study.optimize(optimize_hyperparameters, n_trials=50)
+        st.success(f"Melhores parâmetros: {study.best_params}")
     
-    # Estatísticas básicas
-    mean = np.mean(sequence)
-    std = np.std(sequence)
-    last = sequence[-1]
-    second_last = sequence[-2]
-    
-    # Dinâmica da roleta
-    if last in WHEEL_ORDER and second_last in WHEEL_ORDER:
-        last_pos = WHEEL_ORDER.index(last)
-        second_last_pos = WHEEL_ORDER.index(second_last)
-        wheel_speed = (last_pos - second_last_pos) % 37
-        deceleration = abs(wheel_speed - ((second_last_pos - WHEEL_ORDER.index(sequence[-3])) % 37) if len(sequence) > 2 else 0
-    else:
-        wheel_speed = 0
-        deceleration = 0
-    
-    # Padrões de repetição
-    freq = Counter(sequence)
-    hot_number = max(freq.values()) if freq else 1
-    cold_number = min(freq.values()) if freq else 0
-    
-    return [
-        mean/36,  # Normalizado
-        std/18,
-        wheel_speed/36,
-        deceleration/36,
-        freq.get(last, 0)/hot_number,
-        (hot_number - cold_number)/len(sequence),
-        len(freq)/len(sequence),  # Diversidade
-        1 if last == second_last else 0  # Repetição
-    ]
+    if st.button("Reiniciar Sistema"):
+        st.session_state.history = []
+        st.session_state.model = None
+        st.session_state.memory = deque(maxlen=2000)
+        st.session_state.stats = {
+            'balance': 1000,
+            'bet_history': [],
+            'wins': 0,
+            'losses': 0
+        }
 
-def predict_next_numbers(model, history):
-    """Gera previsões com análise de confiança avançada"""
-    if len(history) < SEQUENCE_LEN or model is None:
-        return []
+# Entrada de dados
+with st.form("input_form", clear_on_submit=True):
+    num = st.number_input("Número sorteado (0-36):", 
+                         min_value=0, 
+                         max_value=36, 
+                         key="current_number",
+                         on_change=clear_input)
     
-    # Prepara dados de entrada
-    seq = np.array(history[-SEQUENCE_LEN:]).reshape(1, SEQUENCE_LEN, 1)
-    features = np.array([get_advanced_features(history[-SEQUENCE_LEN:])])
-    
-    # Predição neural
-    raw_pred = model.predict([seq, features], verbose=0)[0]
-    
-    # Ajuste de temperatura para as probabilidades
-    temperature = 0.7  # Controla a "criatividade" das previsões
-    adjusted_pred = np.log(raw_pred + 1e-10) / temperature
-    adjusted_pred = np.exp(adjusted_pred)
-    adjusted_pred /= adjusted_pred.sum()
-    
-    # Pós-processamento inteligente
-    weighted_pred = []
-    for num in range(NUM_TOTAL):
-        # Fator de frequência (peso exponencial)
-        freq_factor = 1 + np.exp(Counter(history[-100:]).get(num, 0)/3 - 1)
-        
-        # Fator de distância física
-        if history[-1] in WHEEL_ORDER and num in WHEEL_ORDER:
-            distance = WHEEL_DISTANCE[history[-1]][num]
-            distance_factor = 2.5 - (distance / 12)
-        else:
-            distance_factor = 1.0
-            
-        # Fator de momentum
-        if len(history) > 3:
-            momentum = sum(1 for i in range(1,4) if history[-i] == num)
-            momentum_factor = 1 + momentum*0.3
-        else:
-            momentum_factor = 1.0
-            
-        weighted_pred.append(adjusted_pred[num] * freq_factor * distance_factor * momentum_factor)
-    
-    weighted_pred = np.array(weighted_pred)
-    weighted_pred /= weighted_pred.sum()
-    
-    # Seleciona apenas números com confiança significativa
-    confidence_threshold = 0.07  # 7% de confiança mínima
-    top_numbers = [(i, weighted_pred[i]) for i in np.argsort(weighted_pred)[-5:][::-1] 
-                  if weighted_pred[i] >= confidence_threshold]
-    
-    return top_numbers
-
-def get_optimal_neighbors(number, confidence, history):
-    """Calcula a estratégia ótima de vizinhos baseada em confiança e histórico"""
-    if number not in WHEEL_ORDER:
-        return []
-    
-    # Calcula quantidade dinâmica de vizinhos
-    base_neighbors = min(int(confidence * 15), 4)  # Máximo 4 vizinhos
-    
-    # Ajusta baseado na volatilidade recente
-    volatility = np.std([WHEEL_ORDER.index(n) for n in history[-10:] if n in WHEEL_ORDER])/18 if len(history) > 10 else 0.5
-    neighbor_count = max(1, min(4, int(base_neighbors * (1 + volatility)))
-    
-    idx = WHEEL_ORDER.index(number)
-    neighbors = []
-    for i in range(1, neighbor_count + 1):
-        neighbors.append(WHEEL_ORDER[(idx - i) % 37])
-        neighbors.append(WHEEL_ORDER[(idx + i) % 37])
-    
-    # Remove duplicatas e o próprio número
-    return list(set(neighbors) - {number})
-
-# --- INTERFACE DE ALTA EFICIÊNCIA ---
-st.set_page_config(layout="centered")
-st.title("🔥 ROULETTE AI - PRECISÃO EXTREMA")
-
-# Entrada de dados simplificada
-with st.form("number_input_form", clear_on_submit=True):
-    num_input = st.number_input("DIGITE O ÚLTIMO NÚMERO (0-36) E PRESSIONE ENTER:", 
-                              min_value=0, 
-                              max_value=36, 
-                              step=1,
-                              key="current_number",
-                              on_change=clear_input)
-    
-    submitted = st.form_submit_button("ANALISAR")
-    
-    if submitted and st.session_state.last_input is not None:
-        try:
+    if st.form_submit_button("Registrar"):
+        if 'last_input' in st.session_state and st.session_state.last_input is not None:
             num = int(st.session_state.last_input)
             st.session_state.history.append(num)
-            st.session_state.last_input = None
             
-            # Treinamento contínuo do modelo
-            if len(st.session_state.history) > SEQUENCE_LEN * 2:
-                if st.session_state.model is None:
-                    st.session_state.model = build_deep_learning_model()
-                
-                with st.spinner("🧠 APRENDENDO PADRÕES COMPLEXOS..."):
-                    X_seq, X_feat, y = [], [], []
-                    for i in range(len(st.session_state.history) - SEQUENCE_LEN - 1):
-                        seq = st.session_state.history[i:i+SEQUENCE_LEN]
-                        X_seq.append(seq)
-                        X_feat.append(get_advanced_features(seq))
-                        y.append(st.session_state.history[i+SEQUENCE_LEN])
-                    
-                    X_seq = np.array(X_seq).reshape(-1, SEQUENCE_LEN, 1)
-                    X_feat = np.array(X_feat)
-                    y = tf.keras.utils.to_categorical(y, NUM_TOTAL)
-                    
-                    st.session_state.model.fit(
-                        [X_seq, X_feat], y,
-                        epochs=25,
-                        batch_size=32,
-                        verbose=0,
-                        callbacks=[
-                            EarlyStopping(patience=3, restore_best_weights=True),
-                            ReduceLROnPlateau(factor=0.5, patience=2)
-                        ]
-                    )
-        except:
-            st.error("Erro ao processar número. Insira um valor entre 0 e 36.")
-
-# --- PAINEL DE PREDIÇÕES ---
-if len(st.session_state.history) >= SEQUENCE_LEN:
-    if st.session_state.model is None:
-        st.session_state.model = build_deep_learning_model()
-    
-    predictions = predict_next_numbers(st.session_state.model, st.session_state.history)
-    
-    if predictions:
-        st.subheader("🎯 ESTRATÉGIA ÓTIMA DE APOSTAS")
-        
-        # Exibe cada previsão com estratégia calculada
-        for num, confidence in predictions:
-            neighbors = get_optimal_neighbors(num, confidence, st.session_state.history)
+            # Inicializar agente se necessário
+            if st.session_state.model is None:
+                st.session_state.model = DQNAgent()
             
-            with st.container():
-                cols = st.columns([1, 3])
-                cols[0].metric(label=f"NÚMERO PRIMÁRIO", 
-                              value=f"{num}", 
-                              delta=f"CONFIANÇA: {confidence:.1%}")
+            # Processar aprendizado
+            if len(st.session_state.history) > SEQ_LEN:
+                agent = st.session_state.model
+                state = (
+                    st.session_state.history[-SEQ_LEN-1:-1],
+                    agent.get_features(st.session_state.history[-SEQ_LEN-1:-1])
+                )
+                next_state = (
+                    st.session_state.history[-SEQ_LEN:],
+                    agent.get_features(st.session_state.history[-SEQ_LEN:])
+                )
                 
-                if neighbors:
-                    cols[1].write(f"**VIZINHOS ESTRATÉGICOS ({len(neighbors)}):**")
-                    neighbor_cols = st.columns(len(neighbors))
-                    for i, neighbor in enumerate(neighbors):
-                        neighbor_cols[i].metric(label="", value=neighbor)
+                # Simular recompensa (implementar lógica real)
+                reward = 10 if num == np.random.randint(0, 37) else -1
+                done = False
+                
+                agent.remember(state, num, reward, next_state, done)
+                agent.replay(BATCH_SIZE)
+                
+                # Atualizar estatísticas
+                if reward > 0:
+                    st.session_state.stats['wins'] += 1
+                    st.session_state.stats['balance'] += 35  # Pagamento roleta
                 else:
-                    cols[1].warning("ALTA CONFIANÇA - JOGAR APENAS O NÚMERO PRIMÁRIO")
-                
-                st.progress(float(confidence))
+                    st.session_state.stats['losses'] += 1
+                    st.session_state.stats['balance'] -= 1
+
+# Visualização
+col1, col2 = st.columns([3, 2])
+
+with col1:
+    st.subheader("Previsões e Estratégia")
+    if len(st.session_state.history) >= SEQ_LEN and st.session_state.model:
+        agent = st.session_state.model
+        current_state = (
+            st.session_state.history[-SEQ_LEN:],
+            agent.get_features(st.session_state.history[-SEQ_LEN:])
+        )
+        
+        # Obter Q-values
+        seq = np.array(current_state[0]).reshape(1, SEQ_LEN, 1)
+        feat = np.array([current_state[1]])
+        q_values = agent.model.predict([seq, feat], verbose=0)[0]
+        
+        # Top 5 números recomendados
+        top_indices = np.argsort(q_values)[-5:][::-1]
+        
+        st.write("### Melhores Apostas (Q-Values)")
+        for i, num in enumerate(top_indices):
+            st.metric(f"Número {num}", f"Q-Value: {q_values[num]:.2f}")
             
-            # Atualiza estatísticas
-            if len(st.session_state.history) > SEQUENCE_LEN:
-                last_num = st.session_state.history[-1]
-                if num == last_num:
-                    st.session_state.stats['acertos'] += 1
-                    st.session_state.stats['streak'] += 1
-                    st.session_state.stats['max_streak'] = max(
-                        st.session_state.stats['max_streak'],
-                        st.session_state.stats['streak']
-                    )
-                else:
-                    st.session_state.stats['streak'] = 0
-                st.session_state.stats['total'] += 1
+            # Sugestão de vizinhos
+            neighbors = []
+            if num in WHEEL_ORDER:
+                idx = WHEEL_ORDER.index(num)
+                neighbors = [WHEEL_ORDER[(idx-1)%37], WHEEL_ORDER[(idx+1)%37]]
+            
+            st.write(f"Vizinhos estratégicos: {neighbors}")
 
-# --- PAINEL DE PERFORMANCE ---
-if st.session_state.stats['total'] > 0:
-    st.subheader("📊 DESEMPENHO DO SISTEMA")
+with col2:
+    st.subheader("Status do Sistema")
+    st.metric("Saldo", f"R$ {st.session_state.stats['balance']:.2f}")
+    st.metric("Vitórias/Perdas", f"{st.session_state.stats['wins']}/{st.session_state.stats['losses']}")
     
-    accuracy = st.session_state.stats['acertos'] / st.session_state.stats['total']
-    expected = st.session_state.stats['total'] * (3/37)  # Baseline de 3 números
+    st.write("### Histórico Recente")
+    if st.session_state.history:
+        st.write(st.session_state.history[-10:])
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("ACERTOS", st.session_state.stats['acertos'])
-    col2.metric("PRECISÃO", f"{accuracy:.1%}", 
-               f"{(accuracy/(3/37)-1):.0%} acima do esperado")
-    col3.metric("SEQUÊNCIA", f"{st.session_state.stats['streak']}", 
-               f"Máx: {st.session_state.stats['max_streak']}")
+    st.write("### Hiperparâmetros Atuais")
+    st.json({
+        "Taxa de Aprendizado": LEARNING_RATE,
+        "Fator Gamma": GAMMA,
+        "Decaimento Epsilon": EPSILON_DECAY
+    })
 
-# --- HISTÓRICO COMPACTO ---
-if st.session_state.history:
-    st.subheader("ÚLTIMOS NÚMEROS")
-    history_text = " → ".join(map(str, st.session_state.history[-20:]))
-    st.write(history_text)
-    
-    # Análise de padrões
-    if len(st.session_state.history) > 10:
-        last_10 = st.session_state.history[-10:]
-        repeats = sum(1 for i in range(1, len(last_10)) if last_10[i] == last_10[i-1])
-        changes = len(set(last_10))
-        
-        st.caption(f"🔍 Padrões: {repeats} repetições | {changes} números distintos")
-
-# --- OTIMIZAÇÃO CONTÍNUA ---
-if st.session_state.model and len(st.session_state.history) > 50:
-    with st.expander("⚙️ OTIMIZAÇÃO AVANÇADA"):
-        st.write("**Status do Modelo:**")
-        st.json({
-            "Tamanho do Histórico": len(st.session_state.history),
-            "Taxa de Acerto": f"{accuracy:.2%}",
-            "Números Analisados": SEQUENCE_LEN,
-            "Arquitetura": "LSTM Profunda (256-128-64) + Atenção"
-        })
-        
-        if st.button("OTIMIZAR MODELO"):
-            with st.spinner("REOTIMIZANDO REDE NEURAL..."):
-                st.session_state.model = build_deep_learning_model()
-                st.success("Modelo reforçado com sucesso!")
+# Otimização contínua (executar em background)
+if st.session_state.model and len(st.session_state.history) > 100:
+    agent = st.session_state.model
+    agent.replay(BATCH_SIZE)
+    agent.update_target_model()
