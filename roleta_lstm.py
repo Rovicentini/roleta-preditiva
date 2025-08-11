@@ -15,6 +15,18 @@ from collections import Counter, deque
 import random
 import time
 
+
+defaults = {
+    'stats': {'bets': 0, 'hits': 0, 'balance': 0.0},
+    'dqn_agent': None,
+    'model': None
+}
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+
+
 # Optional: Keras Tuner (may need pip install keras-tuner)
 try:
     import keras_tuner as kt
@@ -492,4 +504,5 @@ with st.expander("💾 Salvar / Carregar Modelos"):
 
 st.markdown("---")
 st.caption("Notas: este é um ambiente de pesquisa. Não há garantias de lucro. Ajuste BET_AMOUNT, políticas de recompensa e parâmetros de treino conforme seu experimento.")
+
 
