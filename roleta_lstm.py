@@ -30,6 +30,13 @@ if 'model' not in st.session_state:
     st.session_state.model = None
 if 'stats' not in st.session_state:
     st.session_state.stats = {'acertos': 0, 'total': 0, 'streak': 0, 'max_streak': 0}
+if 'last_input' not in st.session_state:
+    st.session_state.last_input = None
+
+# Função para limpar o campo de entrada
+def clear_input():
+    st.session_state.last_input = st.session_state.current_number
+    st.session_state.current_number = ""
 
 # --- ARQUITETURA NEURAL PROFUNDA ---
 def build_deep_learning_model():
@@ -102,7 +109,7 @@ def get_advanced_features(sequence):
         last_pos = WHEEL_ORDER.index(last)
         second_last_pos = WHEEL_ORDER.index(second_last)
         wheel_speed = (last_pos - second_last_pos) % 37
-        deceleration = abs(wheel_speed - ((second_last_pos - WHEEL_ORDER.index(sequence[-3])) % 37)) if len(sequence) > 2 else 0
+        deceleration = abs(wheel_speed - ((second_last_pos - WHEEL_ORDER.index(sequence[-3])) % 37) if len(sequence) > 2 else 0
     else:
         wheel_speed = 0
         deceleration = 0
@@ -183,7 +190,7 @@ def get_optimal_neighbors(number, confidence, history):
     
     # Ajusta baseado na volatilidade recente
     volatility = np.std([WHEEL_ORDER.index(n) for n in history[-10:] if n in WHEEL_ORDER])/18 if len(history) > 10 else 0.5
-    neighbor_count = max(1, min(4, int(base_neighbors * (1 + volatility))))
+    neighbor_count = max(1, min(4, int(base_neighbors * (1 + volatility)))
     
     idx = WHEEL_ORDER.index(number)
     neighbors = []
@@ -199,43 +206,51 @@ st.set_page_config(layout="centered")
 st.title("🔥 ROULETTE AI - PRECISÃO EXTREMA")
 
 # Entrada de dados simplificada
-with st.form("number_input_form"):
+with st.form("number_input_form", clear_on_submit=True):
     num_input = st.number_input("DIGITE O ÚLTIMO NÚMERO (0-36) E PRESSIONE ENTER:", 
-                              min_value=0, max_value=36, step=1,
-                              key="current_number")
+                              min_value=0, 
+                              max_value=36, 
+                              step=1,
+                              key="current_number",
+                              on_change=clear_input)
+    
     submitted = st.form_submit_button("ANALISAR")
     
-    if submitted and num_input is not None:
-        st.session_state.history.append(num_input)
-        
-        # Treinamento contínuo do modelo
-        if len(st.session_state.history) > SEQUENCE_LEN * 2:
-            if st.session_state.model is None:
-                st.session_state.model = build_deep_learning_model()
+    if submitted and st.session_state.last_input is not None:
+        try:
+            num = int(st.session_state.last_input)
+            st.session_state.history.append(num)
+            st.session_state.last_input = None
             
-            with st.spinner("🧠 APRENDENDO PADRÕES COMPLEXOS..."):
-                X_seq, X_feat, y = [], [], []
-                for i in range(len(st.session_state.history) - SEQUENCE_LEN - 1):
-                    seq = st.session_state.history[i:i+SEQUENCE_LEN]
-                    X_seq.append(seq)
-                    X_feat.append(get_advanced_features(seq))
-                    y.append(st.session_state.history[i+SEQUENCE_LEN])
+            # Treinamento contínuo do modelo
+            if len(st.session_state.history) > SEQUENCE_LEN * 2:
+                if st.session_state.model is None:
+                    st.session_state.model = build_deep_learning_model()
                 
-                X_seq = np.array(X_seq).reshape(-1, SEQUENCE_LEN, 1)
-                X_feat = np.array(X_feat)
-                y = tf.keras.utils.to_categorical(y, NUM_TOTAL)
-                
-                # Treino com callbacks avançados
-                st.session_state.model.fit(
-                    [X_seq, X_feat], y,
-                    epochs=25,
-                    batch_size=32,
-                    verbose=0,
-                    callbacks=[
-                        EarlyStopping(patience=3, restore_best_weights=True),
-                        ReduceLROnPlateau(factor=0.5, patience=2)
-                    ]
-                )
+                with st.spinner("🧠 APRENDENDO PADRÕES COMPLEXOS..."):
+                    X_seq, X_feat, y = [], [], []
+                    for i in range(len(st.session_state.history) - SEQUENCE_LEN - 1):
+                        seq = st.session_state.history[i:i+SEQUENCE_LEN]
+                        X_seq.append(seq)
+                        X_feat.append(get_advanced_features(seq))
+                        y.append(st.session_state.history[i+SEQUENCE_LEN])
+                    
+                    X_seq = np.array(X_seq).reshape(-1, SEQUENCE_LEN, 1)
+                    X_feat = np.array(X_feat)
+                    y = tf.keras.utils.to_categorical(y, NUM_TOTAL)
+                    
+                    st.session_state.model.fit(
+                        [X_seq, X_feat], y,
+                        epochs=25,
+                        batch_size=32,
+                        verbose=0,
+                        callbacks=[
+                            EarlyStopping(patience=3, restore_best_weights=True),
+                            ReduceLROnPlateau(factor=0.5, patience=2)
+                        ]
+                    )
+        except:
+            st.error("Erro ao processar número. Insira um valor entre 0 e 36.")
 
 # --- PAINEL DE PREDIÇÕES ---
 if len(st.session_state.history) >= SEQUENCE_LEN:
@@ -324,4 +339,3 @@ if st.session_state.model and len(st.session_state.history) > 50:
             with st.spinner("REOTIMIZANDO REDE NEURAL..."):
                 st.session_state.model = build_deep_learning_model()
                 st.success("Modelo reforçado com sucesso!")
-
