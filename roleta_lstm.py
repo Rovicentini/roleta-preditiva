@@ -304,7 +304,7 @@ if st.session_state.history:
     # Análise de padrões
     if len(st.session_state.history) > 10:
         last_10 = st.session_state.history[-10:]
-        repeats = sum(1 for i in range(1, len(last_10)) if last_10[i] == last_10[i-1] else 0
+        repeats = sum(1 for i in range(1, len(last_10)) if last_10[i] == last_10[i-1])
         changes = len(set(last_10))
         
         st.caption(f"🔍 Padrões: {repeats} repetições | {changes} números distintos")
