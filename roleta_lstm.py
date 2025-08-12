@@ -15,6 +15,10 @@ from collections import Counter, deque
 import random
 import logging
 
+
+def rerun():
+    raise st.script_runner.RerunException(st.script_request_queue.RerunData())
+
 logging.basicConfig(filename='roleta.log', filemode='a',
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
@@ -412,8 +416,9 @@ if st.button("Adicionar histórico"):
             new_nums = [int(x.strip()) for x in st.session_state.input_bulk.split(",") if x.strip().isdigit() and 0 <= int(x.strip()) <= 36]
             st.session_state.history.extend(new_nums)
             st.success(f"Adicionados {len(new_nums)} números ao histórico.")
-            st.session_state.clear_input_bulk = True
-            st.experimental_rerun()  # Força nova execução logo após mudar o estado
+            # Limpa campo e força rerun
+            st.session_state.input_bulk = ""
+            rerun()
         except Exception as e:
             st.error(f"Erro ao processar números: {e}")
     else:
@@ -575,5 +580,6 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
 
 
