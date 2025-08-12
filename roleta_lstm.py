@@ -257,17 +257,36 @@ class DQNAgent:
     def save(self, path):
         self.model.save_weights(path)
 
-def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT, history=None):
+def optimal_neighbors(number, max_neighbors=3):
+    """
+    Retorna os vizinhos do número na roleta, considerando a lista fixa WHEEL_ORDER.
+    """
+    if number not in WHEEL_ORDER:
+        return []
+    idx = WHEEL_ORDER.index(number)
+    neighbors = []
+    for i in range(1, max_neighbors + 1):
+        left_neighbor = WHEEL_ORDER[(idx - i) % NUM_TOTAL]
+        right_neighbor = WHEEL_ORDER[(idx + i) % NUM_TOTAL]
+        neighbors.append(left_neighbor)
+        neighbors.append(right_neighbor)
+    # Remove duplicados e mantém ordem
+    return list(dict.fromkeys(neighbors))
+
+def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT, max_neighbors=3):
+    """
+    Computa a recompensa considerando o número exato e seus vizinhos na roda.
+    """
     valid_numbers = set()
     for num in action_numbers:
         valid_numbers.add(num)
-        if history is not None:
-            neighbors = optimal_neighbors(num, history, max_neighbors=2)
-            valid_numbers.update(neighbors)
+        neighbors = optimal_neighbors(num, max_neighbors)
+        valid_numbers.update(neighbors)
     if outcome_number in valid_numbers:
         return 35.0 * bet_amount
     else:
         return -1.0 * bet_amount
+
 
 def sequence_to_one_hot(sequence):
     seq = list(sequence[-SEQUENCE_LEN:])
@@ -319,15 +338,7 @@ def predict_next_numbers(model, history):
     top_indices = list(np.argsort(weighted)[-3:][::-1])
     return [(i, float(weighted[i])) for i in top_indices]
 
-def optimal_neighbors(number, history, max_neighbors=2):
-    if number not in WHEEL_ORDER:
-        return []
-    idx = WHEEL_ORDER.index(number)
-    neigh = []
-    for i in range(1, max_neighbors+1):
-        neigh.extend([WHEEL_ORDER[(idx-i)%37], WHEEL_ORDER[(idx+i)%37]])
-    # Remove duplicados mantendo ordem
-    return list(dict.fromkeys(neigh))
+
 
 
 # --- STREAMLIT UI ---
@@ -456,3 +467,4 @@ st.write(f"Apostas feitas: {st.session_state.stats['bets']}")
 st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro estimado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Maior sequência de vitórias: {st.session_state.stats['max_streak']}")
+
