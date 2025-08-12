@@ -405,9 +405,11 @@ st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (REVISADO)")
 st.markdown("### Inserir histórico manualmente (ex: 0,32,15,19,4,21)")
 
 # Inicialização do estado só se não existir
-if 'input_bulk' not in st.session_state:
-    st.session_state.input_bulk = ""
+# Inicializa a flag no session_state, se ainda não existir
+if 'clear_input_bulk' not in st.session_state:
+    st.session_state.clear_input_bulk = False
 
+# Exibe o text_area com key fixo, mas sem mudar seu valor aqui
 input_bulk = st.text_area("Cole números separados por vírgula", key="input_bulk")
 
 if st.button("Adicionar histórico"):
@@ -416,17 +418,17 @@ if st.button("Adicionar histórico"):
             new_nums = [int(x.strip()) for x in st.session_state.input_bulk.split(",") if x.strip().isdigit() and 0 <= int(x.strip()) <= 36]
             st.session_state.history.extend(new_nums)
             st.success(f"Adicionados {len(new_nums)} números ao histórico.")
-            # Define para limpar e força o rerun para atualizar o widget
-            st.session_state.input_bulk = ""
-            st.experimental_rerun()  # isso deve ser chamado imediatamente após mudar o valor para garantir atualização correta
+            # Configura flag para limpar input_bulk na próxima execução
+            st.session_state.clear_input_bulk = True
+            st.experimental_rerun()  # força reinicialização para atualizar o campo limpo
         except Exception as e:
             st.error(f"Erro ao processar números: {e}")
     else:
         st.warning("Insira números válidos para adicionar.")
 
-
-# Após a rerun, limpa a flag
+# Se a flag estiver ativada, limpa o campo input_bulk e reseta a flag
 if st.session_state.clear_input_bulk:
+    st.session_state.input_bulk = ""
     st.session_state.clear_input_bulk = False
 
 
@@ -581,6 +583,7 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
 
 
 
