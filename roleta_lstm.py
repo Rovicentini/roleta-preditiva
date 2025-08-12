@@ -409,5 +409,21 @@ if len(st.session_state.history) >= SEQUENCE_LEN and st.session_state.model is n
     state = sequence_to_state(st.session_state.history, st.session_state.model)
     agent = st.session_state.dqn_agent
     if agent is not None:
-        action = agent.act(state)
-    else
+    action = agent.act(state)
+else:
+    action = random.randrange(NUM_TOTAL)
+
+st.session_state.prev_state = state
+st.session_state.prev_action = action
+
+st.subheader("🤖 Ação sugerida pela IA (DQN):")
+st.write(f"Aposte no número: **{action}**")
+
+st.markdown("---")
+st.subheader("📊 Estatísticas da sessão")
+st.write(f"Total de apostas: {st.session_state.stats['bets']}")
+st.write(f"Vitórias: {st.session_state.stats['wins']}")
+st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
+st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
+
+
