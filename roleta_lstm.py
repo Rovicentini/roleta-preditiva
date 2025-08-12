@@ -413,16 +413,16 @@ if st.button("Adicionar histórico"):
             st.session_state.history.extend(new_nums)
             st.success(f"Adicionados {len(new_nums)} números ao histórico.")
             st.session_state.clear_input_bulk = True
+            st.experimental_rerun()  # Força nova execução logo após mudar o estado
         except Exception as e:
             st.error(f"Erro ao processar números: {e}")
     else:
         st.warning("Insira números válidos para adicionar.")
 
-# Depois de limpar, reseta flag para próxima execução
+# Após a rerun, limpa a flag
 if st.session_state.clear_input_bulk:
-    st.session_state.input_bulk = ""
     st.session_state.clear_input_bulk = False
-    st.experimental_rerun()
+
 
 
 st.markdown("---")
@@ -575,4 +575,5 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
 
