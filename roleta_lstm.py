@@ -386,7 +386,7 @@ if st.session_state.last_input is not None:
             else:
                 top_actions = [st.session_state.prev_action]
 
-            reward = compute_reward(top_actions, num, bet_amount=BET_AMOUNT, history=st.session_state.history)
+            reward = compute_reward(top_actions, num, bet_amount=BET_AMOUNT)
             next_state = sequence_to_state(st.session_state.history, st.session_state.model)
 
             if agent is not None:
@@ -467,4 +467,5 @@ st.write(f"Apostas feitas: {st.session_state.stats['bets']}")
 st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro estimado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Maior sequência de vitórias: {st.session_state.stats['max_streak']}")
+
 
