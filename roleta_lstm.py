@@ -16,13 +16,11 @@ import random
 import time
 import logging
 
-# Configura logger
 logging.basicConfig(filename='roleta.log', filemode='a',
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
 logger = logging.getLogger()
 
-# ------------------ SAFE SESSION-STATE INITIALIZATION ------------------
 if 'history' not in st.session_state:
     st.session_state.history = []
 if 'model' not in st.session_state:
@@ -40,17 +38,15 @@ if 'prev_state' not in st.session_state:
 if 'prev_action' not in st.session_state:
     st.session_state.prev_action = None
 
-# Optional: Keras Tuner
 try:
     import keras_tuner as kt
     KERAS_TUNER_AVAILABLE = True
 except Exception:
     KERAS_TUNER_AVAILABLE = False
 
-# ---------- CONFIGURAÇÕES GLOBAIS ----------
-NUM_TOTAL = 37            # 0..36 (roleta europeia)
-SEQUENCE_LEN = 20         # janela temporal
-BET_AMOUNT = 1.0          # aposta unitária
+NUM_TOTAL = 37
+SEQUENCE_LEN = 20
+BET_AMOUNT = 1.0
 TARGET_UPDATE_FREQ = 50
 REPLAY_BATCH = 64
 REPLAY_SIZE = 5000
@@ -61,18 +57,14 @@ DQN_GAMMA = 0.95
 WHEEL_ORDER = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26]
 WHEEL_DISTANCE = [[min(abs(i-j), 37-abs(i-j)) for j in range(37)] for i in range(37)]
 
-# ------------------ AUX FUNCTIONS ------------------
-
 def get_advanced_features(sequence):
     if sequence is None or len(sequence) < 2:
         return [0.0]*8
-
     seq = np.array(sequence)
     mean = np.mean(seq)
     std = np.std(seq)
     last = int(sequence[-1])
     second_last = int(sequence[-2])
-
     if last in WHEEL_ORDER and second_last in WHEEL_ORDER:
         last_pos = WHEEL_ORDER.index(last)
         second_last_pos = WHEEL_ORDER.index(second_last)
@@ -86,11 +78,9 @@ def get_advanced_features(sequence):
     else:
         wheel_speed = 0
         deceleration = 0
-
     freq = Counter(sequence)
     hot_number = max(freq.values()) if freq else 1
     cold_number = min(freq.values()) if freq else 0
-
     return [
         mean / 36.0,
         std / 18.0,
@@ -107,9 +97,7 @@ def sequence_to_state(sequence, model=None):
     pad = [ -1 ] * max(0, (SEQUENCE_LEN - len(seq)))
     seq_padded = pad + seq
     seq_norm = [(x/36.0 if (isinstance(x, (int, float)) and x>=0) else -1.0) for x in seq_padded]
-
     features = get_advanced_features(sequence[-SEQUENCE_LEN:]) if sequence else [0]*8
-
     probs = [0.0]*NUM_TOTAL
     if model is not None and len(sequence) >= SEQUENCE_LEN:
         try:
@@ -120,44 +108,33 @@ def sequence_to_state(sequence, model=None):
                 probs = raw[0].tolist()
         except Exception:
             probs = [0.0]*NUM_TOTAL
-
     state = np.array(seq_norm + features + probs, dtype=np.float32)
     return state
 
 def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     seq_input = Input(shape=(seq_len, 1), name='sequence_input')
-
     lstm1 = LSTM(256, return_sequences=True,
                  kernel_regularizer=l2(0.001),
                  recurrent_regularizer=l2(0.001))(seq_input)
     lstm1 = BatchNormalization()(lstm1)
     lstm1 = Dropout(0.4)(lstm1)
-
     lstm2 = LSTM(128, return_sequences=True)(lstm1)
     lstm2 = BatchNormalization()(lstm2)
-
     attention = Attention(use_scale=True)([lstm2, lstm2])
     lstm3 = LSTM(64)(attention)
-
     feat_input = Input(shape=(8,), name='features_input')
     dense_feat = Dense(64, activation='swish')(feat_input)
     dense_feat = BatchNormalization()(dense_feat)
     dense_feat = Dropout(0.3)(dense_feat)
-
     combined = Concatenate()([lstm3, dense_feat])
-
     dense1 = Dense(256, activation='swish',
                    kernel_regularizer=l2(0.001))(combined)
     dense1 = BatchNormalization()(dense1)
     dense1 = Dropout(0.5)(dense1)
-
     dense2 = Dense(128, activation='swish')(dense1)
     dense2 = BatchNormalization()(dense2)
-
     output = Dense(num_total, activation='softmax')(dense2)
-
     model = Model(inputs=[seq_input, feat_input], outputs=output)
-
     optimizer = Nadam(learning_rate=5e-4, clipnorm=1.0)
     model.compile(optimizer=optimizer,
                   loss='categorical_crossentropy',
@@ -174,11 +151,9 @@ class DQNAgent:
         self.epsilon_min = 0.02
         self.epsilon_decay = 0.995
         self.learning_rate = lr
-
         self.model = self._build_model()
         self.target_model = self._build_model()
         self.update_target()
-
         self.train_step = 0
 
     def _build_model(self):
@@ -203,7 +178,22 @@ class DQNAgent:
             return
         self.memory.append((state, action, reward, next_state, done))
 
+    # --- ALTERAÇÃO: Novo método para retornar TOP K ações ---
+    def act_top_k(self, state, k=3, use_epsilon=True):
+        if state is None or len(state) == 0:
+            return random.sample(range(self.action_size), k)
+        if use_epsilon and np.random.rand() <= self.epsilon:
+            return random.sample(range(self.action_size), k)
+        try:
+            q_values = self.model.predict(np.array([state]), verbose=0)[0]
+            top_k_actions = np.argsort(q_values)[-k:][::-1]  # top k maiores
+            return top_k_actions.tolist()
+        except Exception:
+            return random.sample(range(self.action_size), k)
+
+    # Método original de ação removido, vamos deixar para backward compatibility
     def act(self, state, use_epsilon=True):
+        # Só retorna 1 ação (o maior Q)
         if state is None or len(state) == 0:
             return random.randrange(self.action_size)
         if use_epsilon and np.random.rand() <= self.epsilon:
@@ -227,7 +217,6 @@ class DQNAgent:
             q_curr = self.model.predict(states, verbose=0)
         except Exception:
             return
-
         X = []
         Y = []
         for i, (state, action, reward, next_state, done) in enumerate(batch):
@@ -253,8 +242,15 @@ class DQNAgent:
     def save(self, path):
         self.model.save_weights(path)
 
-def compute_reward(action_number, outcome_number, bet_amount=BET_AMOUNT):
-    if action_number == outcome_number:
+def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT, history=None):
+    # Modificado para aceitar lista de ações e considerar vizinhos para acerto
+    valid_numbers = set()
+    for num in action_numbers:
+        valid_numbers.add(num)
+        if history is not None:
+            neighbors = optimal_neighbors(num, history, max_neighbors=2)
+            valid_numbers.update(neighbors)
+    if outcome_number in valid_numbers:
         return 35.0 * bet_amount
     else:
         return -1.0 * bet_amount
@@ -262,19 +258,16 @@ def compute_reward(action_number, outcome_number, bet_amount=BET_AMOUNT):
 def predict_next_numbers(model, history):
     if history is None or len(history) < SEQUENCE_LEN or model is None:
         return []
-
     try:
         seq = np.array(history[-SEQUENCE_LEN:]).reshape(1, SEQUENCE_LEN, 1)
         feat = np.array([get_advanced_features(history[-SEQUENCE_LEN:])])
         raw_pred = model.predict([seq, feat], verbose=0)[0]
     except Exception:
         return []
-
     temperature = 0.7
     adjusted = np.log(raw_pred + 1e-10) / temperature
     adjusted = np.exp(adjusted)
     adjusted /= adjusted.sum()
-
     weighted = []
     freq_counter = Counter(history[-100:])
     for num in range(NUM_TOTAL):
@@ -287,12 +280,11 @@ def predict_next_numbers(model, history):
         momentum = sum(1 for i in range(1,4) if len(history)>=i and history[-i] == num)
         momentum_factor = 1 + momentum*0.3
         weighted.append(adjusted[num] * freq_factor * distance_factor * momentum_factor)
-
     weighted = np.array(weighted)
     if weighted.sum() == 0:
         return []
     weighted /= weighted.sum()
-    top_indices = list(np.argsort(weighted)[-5:][::-1])
+    top_indices = list(np.argsort(weighted)[-3:][::-1])  # LIMITADO para top 3 para menos confusão
     return [(i, float(weighted[i])) for i in top_indices]
 
 def optimal_neighbors(number, history, max_neighbors=2):
@@ -303,8 +295,6 @@ def optimal_neighbors(number, history, max_neighbors=2):
     for i in range(1, max_neighbors+1):
         neigh.extend([WHEEL_ORDER[(idx-i)%37], WHEEL_ORDER[(idx+i)%37]])
     return list(dict.fromkeys(neigh))
-
-# ------------------ STREAMLIT UI ------------------
 
 st.set_page_config(layout="centered")
 st.title("🔥 ROULETTE AI - LSTM + DQN (REVISADO)")
@@ -340,13 +330,22 @@ if st.session_state.last_input is not None:
         logger.info(f"Número novo inserido pelo usuário: {num}")
         st.session_state.last_input = None
 
+        # --- Alteração aqui: considerar múltiplas ações (top 3) para cálculo de recompensa ---
         if st.session_state.prev_state is not None and st.session_state.prev_action is not None:
-            reward = compute_reward(st.session_state.prev_action, num, bet_amount=BET_AMOUNT)
-            next_state = sequence_to_state(st.session_state.history, st.session_state.model)
             agent = st.session_state.dqn_agent
             if agent is not None:
-                agent.remember(st.session_state.prev_state, st.session_state.prev_action, reward, next_state, False)
-                logger.info(f"Memorizado: ação={st.session_state.prev_action}, resultado={num}, recompensa={reward}")
+                # Obtem top 3 ações para calcular recompensa
+                top_actions = agent.act_top_k(st.session_state.prev_state, k=3, use_epsilon=False)
+            else:
+                top_actions = [st.session_state.prev_action]
+
+            reward = compute_reward(top_actions, num, bet_amount=BET_AMOUNT, history=st.session_state.history)
+            next_state = sequence_to_state(st.session_state.history, st.session_state.model)
+
+            if agent is not None:
+                # Vamos guardar a ação principal (top 1) para o replay, mas pode-se modificar para usar top_actions se quiser
+                agent.remember(st.session_state.prev_state, top_actions[0], reward, next_state, False)
+                logger.info(f"Memorizado: ações={top_actions}, resultado={num}, recompensa={reward}")
 
             st.session_state.stats['bets'] += 1
             st.session_state.stats['profit'] += reward
@@ -405,24 +404,26 @@ if len(st.session_state.history) >= SEQUENCE_LEN and st.session_state.model is n
     if predictions:
         for n, conf in predictions:
             st.write(f"Número: **{n}** — Prob: {conf:.2%}")
-
-    state = sequence_to_state(st.session_state.history, st.session_state.model)
-    agent = st.session_state.dqn_agent
-    if agent is not None:
-        action = agent.act(state)
-    else:
-        action = random.randrange(NUM_TOTAL)
 else:
-    # Caso condição do if falhe, garantir que action tenha algum valor
-    action = random.randrange(NUM_TOTAL)
-    state = None
+    predictions = []
 
+state = sequence_to_state(st.session_state.history, st.session_state.model)
+agent = st.session_state.dqn_agent
 
+if agent is not None and state is not None:
+    top_actions = agent.act_top_k(state, k=3)
+else:
+    top_actions = random.sample(range(NUM_TOTAL), 3)
+
+# Mostrar as ações e seus vizinhos:
+st.subheader("🤖 Ações sugeridas pela IA (DQN) com vizinhos")
+for action in top_actions:
+    neighbors = optimal_neighbors(action, st.session_state.history, max_neighbors=2)
+    st.write(f"Aposte no número: **{action}** | Vizinhos: {neighbors}")
+
+# Guardar para próxima interação a ação principal (top 1)
 st.session_state.prev_state = state
-st.session_state.prev_action = action
-
-st.subheader("🤖 Ação sugerida pela IA (DQN):")
-st.write(f"Aposte no número: **{action}**")
+st.session_state.prev_action = top_actions[0]
 
 st.markdown("---")
 st.subheader("📊 Estatísticas da sessão")
@@ -430,7 +431,3 @@ st.write(f"Total de apostas: {st.session_state.stats['bets']}")
 st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
-
-
-
-
