@@ -51,13 +51,29 @@ DQN_TRAIN_EVERY = 5
 DQN_LEARNING_RATE = 1e-3
 DQN_GAMMA = 0.95
 
+# wheel order (posição física na roda)
 WHEEL_ORDER = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,
                5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26]
-
-# Distância circular entre números na roda
 WHEEL_DISTANCE = [[min(abs(i-j), 37-abs(i-j)) for j in range(37)] for i in range(37)]
 
-# --- FUNÇÕES AUXILIARES ---
+# red numbers for European wheel (standard)
+RED_NUMBERS = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
+
+# --- AUX FUNCTIONS ---
+
+def number_to_color(n):
+    if n == 0:
+        return 0  # zero
+    return 1 if n in RED_NUMBERS else 2  # 1=red,2=black
+
+def number_to_dozen(n):
+    if n == 0:
+        return 0  # zero
+    if 1 <= n <= 12:
+        return 1
+    if 13 <= n <= 24:
+        return 2
+    return 3
 
 def get_advanced_features(sequence):
     if sequence is None or len(sequence) < 2:
@@ -76,10 +92,10 @@ def get_advanced_features(sequence):
             prev_speed = (second_last_pos - third_pos) % 37
             deceleration = abs(wheel_speed - prev_speed)
         else:
-            deceleration = 0
+            deceleration = 0.0
     else:
-        wheel_speed = 0
-        deceleration = 0
+        wheel_speed = 0.0
+        deceleration = 0.0
     freq = Counter(sequence)
     hot_number = max(freq.values()) if freq else 1
     cold_number = min(freq.values()) if freq else 0
@@ -94,71 +110,101 @@ def get_advanced_features(sequence):
         1.0 if last == second_last else 0.0
     ]
 
-def sequence_to_state(sequence, model=None):
-    seq = list(sequence[-SEQUENCE_LEN:]) if len(sequence) > 0 else []
+
+def sequence_to_one_hot(sequence):
+    """
+    Retorna array (SEQUENCE_LEN, NUM_TOTAL) com one-hot da posição na roda.
+    Padding (quando falta histórico) -> vetor zeros.
+    """
+    seq = list(sequence[-SEQUENCE_LEN:]) if sequence else []
     pad = [-1] * max(0, (SEQUENCE_LEN - len(seq)))
     seq_padded = pad + seq
-
-    positions = []
+    one_hot_seq = []
     for x in seq_padded:
         if x in WHEEL_ORDER:
-            positions.append(WHEEL_ORDER.index(x))
-        else:
-            positions.append(-1)
-
-    one_hot_seq = []
-    for pos in positions:
-        if pos == -1:
-            one_hot_seq.append(np.zeros(NUM_TOTAL))
-        else:
+            pos = WHEEL_ORDER.index(x)
             one_hot_seq.append(to_categorical(pos, NUM_TOTAL))
-    one_hot_seq = np.array(one_hot_seq)
+        else:
+            one_hot_seq.append(np.zeros(NUM_TOTAL))
+    return np.array(one_hot_seq)  # shape (SEQUENCE_LEN, NUM_TOTAL)
 
-    features = get_advanced_features(sequence[-SEQUENCE_LEN:]) if sequence else [0]*8
-    probs = np.zeros(NUM_TOTAL)
+
+def sequence_to_state(sequence, model=None):
+    """
+    Retorna estado 1D para o DQN: [one_hot_seq.flatten(), features, num_probs, color_probs, dozen_probs]
+    """
+    one_hot_seq = sequence_to_one_hot(sequence)  # (SEQ, 37)
+    features = get_advanced_features(sequence[-SEQUENCE_LEN:]) if sequence else [0.0]*8
+
+    # default probs
+    num_probs = np.zeros(NUM_TOTAL)
+    color_probs = np.zeros(3)   # [zero, red, black]
+    dozen_probs = np.zeros(4)   # [zero, d1, d2, d3]
+
     if model is not None and len(sequence) >= SEQUENCE_LEN:
         try:
-            seq_arr = np.expand_dims(one_hot_seq, axis=0)
+            seq_arr = np.expand_dims(one_hot_seq, axis=0)  # (1, SEQ, 37)
             feat_arr = np.array([features])
             raw = model.predict([seq_arr, feat_arr], verbose=0)
-            if raw is not None and len(raw) > 0:
-                probs = raw[0]
+            # when model has multiple outputs: raw is list [num_out, color_out, dozen_out]
+            if isinstance(raw, list) and len(raw) == 3:
+                num_probs = np.array(raw[0][0])
+                color_probs = np.array(raw[1][0])
+                dozen_probs = np.array(raw[2][0])
+            else:
+                # fallback: if single output, assume it's numbers
+                out = np.array(raw)
+                if out.shape[-1] == NUM_TOTAL:
+                    num_probs = out[0]
         except Exception:
-            probs = np.zeros(NUM_TOTAL)
+            num_probs = np.zeros(NUM_TOTAL)
 
-    state = np.concatenate([one_hot_seq.flatten(), features, probs]).astype(np.float32)
+    state = np.concatenate([one_hot_seq.flatten(), np.array(features), num_probs, color_probs, dozen_probs]).astype(np.float32)
     return state
 
+
 def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
-    seq_input = Input(shape=(seq_len, NUM_TOTAL), name='sequence_input')
-    lstm1 = LSTM(256, return_sequences=True,
-                 kernel_regularizer=l2(0.001),
-                 recurrent_regularizer=l2(0.001))(seq_input)
+    """
+    LSTM multi-output:
+      - saída 1: probabilidade para cada número (37)
+      - saída 2: probabilidade para cor (3) -> zero/red/black
+      - saída 3: probabilidade para dúzia (4) -> zero/d1/d2/d3
+    """
+    seq_input = Input(shape=(seq_len, num_total), name='sequence_input')
+    lstm1 = LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4))(seq_input)
     lstm1 = BatchNormalization()(lstm1)
-    lstm1 = Dropout(0.4)(lstm1)
-    lstm2 = LSTM(128, return_sequences=True)(lstm1)
+    lstm1 = Dropout(0.3)(lstm1)
+
+    lstm2 = LSTM(64, return_sequences=False)(lstm1)
     lstm2 = BatchNormalization()(lstm2)
-    attention = Attention(use_scale=True)([lstm2, lstm2])
-    lstm3 = LSTM(64)(attention)
+    lstm2 = Dropout(0.25)(lstm2)
+
     feat_input = Input(shape=(8,), name='features_input')
-    dense_feat = Dense(64, activation='swish')(feat_input)
+    dense_feat = Dense(32, activation='swish')(feat_input)
     dense_feat = BatchNormalization()(dense_feat)
-    dense_feat = Dropout(0.3)(dense_feat)
-    combined = Concatenate()([lstm3, dense_feat])
-    dense1 = Dense(256, activation='swish',
-                   kernel_regularizer=l2(0.001))(combined)
-    dense1 = BatchNormalization()(dense1)
-    dense1 = Dropout(0.5)(dense1)
-    dense2 = Dense(128, activation='swish')(dense1)
-    dense2 = BatchNormalization()(dense2)
-    output = Dense(num_total, activation='softmax')(dense2)
-    model = Model(inputs=[seq_input, feat_input], outputs=output)
-    optimizer = Nadam(learning_rate=5e-4, clipnorm=1.0)
+    dense_feat = Dropout(0.2)(dense_feat)
+
+    combined = Concatenate()([lstm2, dense_feat])
+    dense = Dense(128, activation='swish')(combined)
+    dense = BatchNormalization()(dense)
+    dense = Dropout(0.3)(dense)
+
+    out_num = Dense(num_total, activation='softmax', name='num_out')(dense)
+    out_color = Dense(3, activation='softmax', name='color_out')(dense)   # zero/red/black
+    out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)   # zero,d1,d2,d3
+
+    model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen])
+    optimizer = Nadam(learning_rate=5e-4)
     model.compile(optimizer=optimizer,
-                  loss='categorical_crossentropy',
-                  metrics=['accuracy', tf.keras.metrics.TopKCategoricalAccuracy(k=3)])
+                  loss={'num_out': 'categorical_crossentropy',
+                        'color_out': 'categorical_crossentropy',
+                        'dozen_out': 'categorical_crossentropy'},
+                  loss_weights={'num_out': 1.0, 'color_out': 0.3, 'dozen_out': 0.3},
+                  metrics={'num_out': 'accuracy'})
     return model
 
+
+# --- DQN Agent (unchanged structure, but expects larger state vector) ---
 class DQNAgent:
     def __init__(self, state_size, action_size, lr=DQN_LEARNING_RATE, gamma=DQN_GAMMA, replay_size=REPLAY_SIZE):
         self.state_size = int(state_size)
@@ -257,107 +303,114 @@ class DQNAgent:
     def save(self, path):
         self.model.save_weights(path)
 
-def optimal_neighbors(number, max_neighbors=3):
+
+# --- Neighbors & Reward helpers ---
+def optimal_neighbors(number, max_neighbors=2):
     """
-    Retorna os vizinhos do número na roleta, considerando a lista fixa WHEEL_ORDER.
+    Retorna lista de vizinhos (à esquerda e direita alternados) da roda.
     """
     if number not in WHEEL_ORDER:
         return []
     idx = WHEEL_ORDER.index(number)
-    neighbors = []
-    for i in range(1, max_neighbors + 1):
-        left_neighbor = WHEEL_ORDER[(idx - i) % NUM_TOTAL]
-        right_neighbor = WHEEL_ORDER[(idx + i) % NUM_TOTAL]
-        neighbors.append(left_neighbor)
-        neighbors.append(right_neighbor)
-    # Remove duplicados e mantém ordem
-    return list(dict.fromkeys(neighbors))
+    neigh = []
+    for i in range(1, max_neighbors+1):
+        neigh.append(WHEEL_ORDER[(idx - i) % NUM_TOTAL])
+        neigh.append(WHEEL_ORDER[(idx + i) % NUM_TOTAL])
+    return list(dict.fromkeys(neigh))
 
-def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT, max_neighbors=3):
+
+def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT, max_neighbors=2):
     """
-    Computa a recompensa considerando o número exato e seus vizinhos na roda.
+    action_numbers: lista de números apostados (ex: [12, 23, 5])
+    outcome_number: número sorteado
+    max_neighbors: quantos vizinhos considerar (simétricos)
     """
-    valid_numbers = set()
-    for num in action_numbers:
-        valid_numbers.add(num)
-        neighbors = optimal_neighbors(num, max_neighbors)
-        valid_numbers.update(neighbors)
-    if outcome_number in valid_numbers:
+    valid = set()
+    for n in action_numbers:
+        valid.add(n)
+        neigh = optimal_neighbors(n, max_neighbors=max_neighbors)
+        valid.update(neigh)
+    # se acertou, paga 35x a aposta unitária (simulação)
+    if outcome_number in valid:
         return 35.0 * bet_amount
-    else:
-        return -1.0 * bet_amount
+    return -1.0 * bet_amount
 
 
-def sequence_to_one_hot(sequence):
-    seq = list(sequence[-SEQUENCE_LEN:])
-    pad = [-1] * max(0, (SEQUENCE_LEN - len(seq)))
-    seq_padded = pad + seq
-    one_hot_seq = []
-    for x in seq_padded:
-        if x in WHEEL_ORDER:
-            pos = WHEEL_ORDER.index(x)
-            one_hot_seq.append(to_categorical(pos, NUM_TOTAL))
-        else:
-            one_hot_seq.append(np.zeros(NUM_TOTAL))
-    return np.array(one_hot_seq)
-
-def predict_next_numbers(model, history):
+# --- PREDICTION POSTPROCESSING ---
+def predict_next_numbers(model, history, top_k=3):
     if history is None or len(history) < SEQUENCE_LEN or model is None:
         return []
     try:
         seq_one_hot = sequence_to_one_hot(history).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
         feat = np.array([get_advanced_features(history[-SEQUENCE_LEN:])])
-        raw_pred = model.predict([seq_one_hot, feat], verbose=0)[0]
+        raw = model.predict([seq_one_hot, feat], verbose=0)
+        # raw -> [num_probs, color_probs, dozen_probs]
+        if isinstance(raw, list) and len(raw) == 3:
+            num_probs = raw[0][0]
+            color_probs = raw[1][0]
+            dozen_probs = raw[2][0]
+        else:
+            num_probs = np.array(raw)[0]
+            color_probs = np.array([0.0, 0.0, 0.0])
+            dozen_probs = np.array([0.0, 0.0, 0.0, 0.0])
     except Exception:
         return []
 
-    temperature = 0.7
-    adjusted = np.log(raw_pred + 1e-10) / temperature
+    # temperature and weighting (same idea as you had)
+    temperature = 0.8
+    adjusted = np.log(num_probs + 1e-12) / temperature
     adjusted = np.exp(adjusted)
     adjusted /= adjusted.sum()
 
     weighted = []
     freq_counter = Counter(history[-100:])
     last_num = history[-1] if len(history) > 0 else None
-
     for num in range(NUM_TOTAL):
         freq_factor = 1 + np.exp(freq_counter.get(num, 0) / 3 - 1)
-        if last_num in WHEEL_ORDER and num in WHEEL_ORDER:
+        if last_num in WHEEL_ORDER:
             dist = WHEEL_DISTANCE[last_num][num]
-            distance_factor = 2.5 - (dist / 12.0)
+            distance_factor = max(0.1, 2.5 - (dist / 12.0))
         else:
             distance_factor = 1.0
         momentum = sum(1 for i in range(1,4) if len(history)>=i and history[-i] == num)
-        momentum_factor = 1 + momentum*0.3
+        momentum_factor = 1 + momentum*0.25
         weighted.append(adjusted[num] * freq_factor * distance_factor * momentum_factor)
     weighted = np.array(weighted)
     if weighted.sum() == 0:
         return []
     weighted /= weighted.sum()
 
-    top_indices = list(np.argsort(weighted)[-3:][::-1])
-    return [(i, float(weighted[i])) for i in top_indices]
+    top_indices = list(np.argsort(weighted)[-top_k:][::-1])
+    # also return color/dozen global predictions
+    color_pred = np.argmax(color_probs)  # 0 zero,1 red,2 black
+    dozen_pred = np.argmax(dozen_probs)  # 0 zero,1 d1,2 d2,3 d3
+    return {
+        'top_numbers': [(int(i), float(weighted[i])) for i in top_indices],
+        'num_probs': num_probs,
+        'color_probs': color_probs,
+        'dozen_probs': dozen_probs,
+        'color_pred': int(color_pred),
+        'dozen_pred': int(dozen_pred)
+    }
 
 
-
-
-# --- STREAMLIT UI ---
-
+# --- UI ---
 st.set_page_config(layout="centered")
-st.title("🔥 ROULETTE AI - LSTM + DQN (REVISADO)")
+st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (REVISADO)")
 
 st.markdown("### Inserir histórico manualmente (ex: 0,32,15,19,4,21)")
 
 input_bulk = st.text_area("Cole números separados por vírgula", value=st.session_state.input_bulk, key="input_bulk")
 
 if st.button("Adicionar histórico"):
-    if input_bulk.strip():
+    if st.session_state.input_bulk and st.session_state.input_bulk.strip():
         try:
-            new_nums = [int(x.strip()) for x in input_bulk.split(",") if x.strip().isdigit() and 0 <= int(x.strip()) <= 36]
+            new_nums = [int(x.strip()) for x in st.session_state.input_bulk.split(",") if x.strip().isdigit() and 0 <= int(x.strip()) <= 36]
             st.session_state.history.extend(new_nums)
             st.success(f"Adicionados {len(new_nums)} números ao histórico.")
             logger.info(f"Usuário adicionou {len(new_nums)} números: {new_nums}")
-            st.session_state.input_bulk = ""  # limpa o campo
+            # limpa o campo do widget via session_state — seguro
+            st.session_state.input_bulk = ""
         except Exception as e:
             st.error(f"Erro ao processar números: {e}")
     else:
@@ -378,7 +431,13 @@ if st.session_state.last_input is not None:
         logger.info(f"Número novo inserido pelo usuário: {num}")
         st.session_state.last_input = None
 
-        # DQN Agent processing
+        # se agente não existir, criaremos quando tivermos um state_example
+        state_example = sequence_to_state(st.session_state.history, st.session_state.model)
+        if state_example is not None and (st.session_state.dqn_agent is None):
+            st.session_state.dqn_agent = DQNAgent(state_size=state_example.shape[0], action_size=NUM_TOTAL)
+            logger.info("Agente DQN criado")
+
+        # PROCESSAMENTO DQN / RECOMPENSA
         if st.session_state.prev_state is not None and st.session_state.prev_action is not None:
             agent = st.session_state.dqn_agent
             if agent is not None:
@@ -386,7 +445,8 @@ if st.session_state.last_input is not None:
             else:
                 top_actions = [st.session_state.prev_action]
 
-            reward = compute_reward(top_actions, num, bet_amount=BET_AMOUNT)
+            # compute reward considering neighbors (default max_neighbors=2)
+            reward = compute_reward(top_actions, num, bet_amount=BET_AMOUNT, max_neighbors=2)
             next_state = sequence_to_state(st.session_state.history, st.session_state.model)
 
             if agent is not None:
@@ -410,62 +470,99 @@ if st.session_state.last_input is not None:
                 agent.update_target()
                 logger.info(f"Target DQN atualizado no passo {st.session_state.step_count}")
 
-        # Criação do modelo LSTM
+        # Criar modelo LSTM se possível
         if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN*2:
             st.session_state.model = build_deep_learning_model()
             logger.info("Modelo LSTM criado")
 
-        # Treinamento curto do modelo LSTM e predição
+        # Treinamento curto do LSTM com dados disponíveis
         if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN*2:
             with st.spinner("Treinando LSTM (curto)..."):
-                X_seq, X_feat, y = [], [], []
+                X_seq, X_feat, y_num, y_color, y_dozen = [], [], [], [], []
                 for i in range(len(st.session_state.history) - SEQUENCE_LEN - 1):
                     seq_slice = st.session_state.history[i:i+SEQUENCE_LEN]
                     target = st.session_state.history[i+SEQUENCE_LEN]
                     X_seq.append(sequence_to_one_hot(seq_slice))
                     X_feat.append(get_advanced_features(seq_slice))
-                    target_pos = WHEEL_ORDER.index(target) if target in WHEEL_ORDER else None
-                    if target_pos is not None:
-                        y.append(to_categorical(target_pos, NUM_TOTAL))
+                    # labels: number -> position index on wheel
+                    if target in WHEEL_ORDER:
+                        pos = WHEEL_ORDER.index(target)
+                        y_num.append(to_categorical(pos, NUM_TOTAL))
                     else:
-                        y.append(np.zeros(NUM_TOTAL))
+                        y_num.append(np.zeros(NUM_TOTAL))
+                    # color label
+                    color_label = number_to_color(target)
+                    y_color.append(to_categorical(color_label, 3))
+                    # dozen label
+                    dozen_label = number_to_dozen(target)
+                    y_dozen.append(to_categorical(dozen_label, 4))
 
                 if len(X_seq) > 0:
                     X_seq = np.array(X_seq)
                     X_feat = np.array(X_feat)
-                    y = np.array(y)
+                    y_num = np.array(y_num)
+                    y_color = np.array(y_color)
+                    y_dozen = np.array(y_dozen)
                     try:
-                        st.session_state.model.fit([X_seq, X_feat], y, epochs=2, verbose=0)
-                        logger.info(f"Modelo LSTM treinado por 2 epochs em batch de tamanho {len(X_seq)}")
+                        st.session_state.model.fit([X_seq, X_feat],
+                                                  [y_num, y_color, y_dozen],
+                                                  epochs=2, batch_size=32, verbose=0)
+                        logger.info(f"Treinamento LSTM curto concluído ({len(X_seq)} amostras).")
                     except Exception as e:
                         logger.error(f"Erro no treinamento LSTM: {e}")
 
-                # Atualiza estado para DQN
-                st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model)
-                # Atualiza prev_action com a ação de maior probabilidade do LSTM
-                preds = st.session_state.model.predict([np.expand_dims(X_seq[-1], 0), np.expand_dims(X_feat[-1], 0)], verbose=0)
-                if preds is not None and len(preds) > 0:
-                    st.session_state.prev_action = int(np.argmax(preds[0]))
-                else:
-                    st.session_state.prev_action = None
+            # Atualiza prev_state e prev_action com previsão nova
+            st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model)
+            pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
+            if pred_info and 'top_numbers' in pred_info:
+                # prev_action armazena a ação principal (número top1)
+                st.session_state.prev_action = pred_info['top_numbers'][0][0]
+            else:
+                st.session_state.prev_action = None
 
-            # Mostrar previsão para o usuário
-            preds = predict_next_numbers(st.session_state.model, st.session_state.history)
-            if preds:
-                st.markdown("### Próximos números mais prováveis:")
-                for num_pred, prob in preds:
-                    st.write(f"Número {num_pred} com probabilidade {prob:.3f}")
+            # Mostrar previsões
+            if pred_info:
+                st.subheader("🎯 Previsões (LSTM ensemble + pós-processamento)")
+                for n, conf in pred_info['top_numbers']:
+                    st.write(f"Número: **{n}** — Prob: {conf:.2%}")
+                # mostrar cor e dúzia
+                color_names = {0: "Zero", 1: "Vermelho", 2: "Preto"}
+                dozen_names = {0: "Zero", 1: "1ª dúzia (1-12)", 2: "2ª dúzia (13-24)", 3: "3ª dúzia (25-36)"}
+                st.write(f"Cor mais provável: **{color_names.get(pred_info['color_pred'],'-')}** — probs: {pred_info['color_probs']}")
+                st.write(f"Dúzia mais provável: **{dozen_names.get(pred_info['dozen_pred'],'-')}** — probs: {pred_info['dozen_probs']}")
 
     except Exception as e:
+        logger.exception("Erro inesperado ao processar entrada")
         st.error(f"Erro inesperado: {e}")
 
-# Mostrar estatísticas simples
+
+# Mostrar estado atual, DQN suggestions e vizinhos
+state = sequence_to_state(st.session_state.history, st.session_state.model)
+agent = st.session_state.dqn_agent
+
+if state is not None and agent is None:
+    st.session_state.dqn_agent = DQNAgent(state_size=state.shape[0], action_size=NUM_TOTAL)
+    agent = st.session_state.dqn_agent
+    logger.info("Agente DQN criado (depois de estado)")
+
+if agent is not None and state is not None:
+    top_actions = agent.act_top_k(state, k=3)
+else:
+    top_actions = random.sample(range(NUM_TOTAL), 3)
+
+st.subheader("🤖 Ações sugeridas pela IA (DQN) com vizinhos")
+for action in top_actions:
+    neighbors = optimal_neighbors(action, max_neighbors=2)
+    st.write(f"Aposte no número: **{action}** | Vizinhos (2 cada lado): {neighbors}")
+
+# salvar estado para próxima interação
+st.session_state.prev_state = state
+st.session_state.prev_action = top_actions[0] if top_actions else None
+
 st.markdown("---")
-st.markdown("### Estatísticas")
-st.write(f"Números inseridos: {len(st.session_state.history)}")
-st.write(f"Apostas feitas: {st.session_state.stats['bets']}")
+st.subheader("📊 Estatísticas da sessão")
+st.write(f"Total de apostas: {st.session_state.stats['bets']}")
 st.write(f"Vitórias: {st.session_state.stats['wins']}")
-st.write(f"Lucro estimado: R$ {st.session_state.stats['profit']:.2f}")
-st.write(f"Maior sequência de vitórias: {st.session_state.stats['max_streak']}")
-
-
+st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
+st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
+st.write(f"Números no histórico: {len(st.session_state.history)}")
