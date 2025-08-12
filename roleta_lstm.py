@@ -408,7 +408,6 @@ st.markdown("### Inserir histórico manualmente (ex: 0,32,15,19,4,21)")
 if 'input_bulk' not in st.session_state:
     st.session_state.input_bulk = ""
 
-# Exibe o text_area com key fixo, mas sem mudar seu valor aqui
 input_bulk = st.text_area("Cole números separados por vírgula", key="input_bulk")
 
 if st.button("Adicionar histórico"):
@@ -417,9 +416,9 @@ if st.button("Adicionar histórico"):
             new_nums = [int(x.strip()) for x in st.session_state.input_bulk.split(",") if x.strip().isdigit() and 0 <= int(x.strip()) <= 36]
             st.session_state.history.extend(new_nums)
             st.success(f"Adicionados {len(new_nums)} números ao histórico.")
-            # Limpa o texto na próxima execução, não aqui diretamente
+            # Define para limpar e força o rerun para atualizar o widget
             st.session_state.input_bulk = ""
-            st.experimental_rerun()  # força a reinicialização para atualizar o campo limpo
+            st.experimental_rerun()  # isso deve ser chamado imediatamente após mudar o valor para garantir atualização correta
         except Exception as e:
             st.error(f"Erro ao processar números: {e}")
     else:
@@ -582,6 +581,7 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
 
 
 
