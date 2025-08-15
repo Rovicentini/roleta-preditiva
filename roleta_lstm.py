@@ -45,16 +45,24 @@ if 'prev_state' not in st.session_state:
 if 'prev_action' not in st.session_state:
     st.session_state.prev_action = None
 if 'prev_actions' not in st.session_state:
-    st.session_state.prev_actions = None   # << Memória das ações realmente tomadas no passo anterior
+    st.session_state.prev_actions = None   # ações realmente tomadas no passo anterior
 if 'input_bulk' not in st.session_state:
     st.session_state.input_bulk = ""
 if 'clear_input_bulk' not in st.session_state:
     st.session_state.clear_input_bulk = False
+# NOVO: rastreadores de pares e trincas
+if 'pair_freq' not in st.session_state:
+    st.session_state.pair_freq = Counter()
+if 'triplet_freq' not in st.session_state:
+    st.session_state.triplet_freq = Counter()
 
 # --- CONSTANTS ---
 NUM_TOTAL = 37
 SEQUENCE_LEN = 20
 BET_AMOUNT = 1.0
+
+# Dimensão das features avançadas (8 antigas + 2 novas de pares/trincas)
+FEATURE_DIM = 10
 
 # Replay/treino DQN
 TARGET_UPDATE_FREQ = 50
@@ -91,6 +99,26 @@ WHEEL_DISTANCE = [[min(abs(i-j), 37-abs(i-j)) for j in range(37)] for i in range
 # red numbers for European wheel (standard)
 RED_NUMBERS = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
 
+# =========================
+# Atualização eficiente de pares/trincas
+# =========================
+def update_pair_triplet_counters_from(history, start_index):
+    """
+    Atualiza os contadores pair_freq e triplet_freq a partir do índice start_index,
+    assumindo que history[start_index:] acabou de ser adicionado.
+    """
+    if start_index is None:
+        start_index = 0
+    for i in range(start_index, len(history)):
+        # par (i-1, i)
+        if i >= 1:
+            pair = (history[i-1], history[i])
+            st.session_state.pair_freq[pair] += 1
+        # trinca (i-2, i-1, i)
+        if i >= 2:
+            triplet = (history[i-2], history[i-1], history[i])
+            st.session_state.triplet_freq[triplet] += 1
+
 # --- AUX FUNCTIONS ---
 
 def number_to_color(n):
@@ -108,13 +136,19 @@ def number_to_dozen(n):
     return 3
 
 def get_advanced_features(sequence):
+    """
+    Retorna FEATURE_DIM features (8 originais + 2 novas de frequência de par/trinca recentes).
+    Usa os contadores no session_state para normalizar.
+    """
     if sequence is None or len(sequence) < 2:
-        return [0.0]*8
+        return [0.0]*FEATURE_DIM
+
     seq = np.array(sequence)
     mean = np.mean(seq)
     std = np.std(seq)
     last = int(sequence[-1])
     second_last = int(sequence[-2])
+
     if last in WHEEL_ORDER and second_last in WHEEL_ORDER:
         last_pos = WHEEL_ORDER.index(last)
         second_last_pos = WHEEL_ORDER.index(second_last)
@@ -128,10 +162,30 @@ def get_advanced_features(sequence):
     else:
         wheel_speed = 0.0
         deceleration = 0.0
+
     freq = Counter(sequence)
     hot_number = max(freq.values()) if freq else 1
     cold_number = min(freq.values()) if freq else 0
-    return [
+
+    # ===== Novas features: frequência do par e da trinca mais recentes =====
+    last_pair_count = 0.0
+    last_triplet_count = 0.0
+
+    if len(sequence) >= 2:
+        last_pair = (sequence[-2], sequence[-1])
+        last_pair_count = st.session_state.pair_freq.get(last_pair, 0)
+
+    if len(sequence) >= 3:
+        last_triplet = (sequence[-3], sequence[-2], sequence[-1])
+        last_triplet_count = st.session_state.triplet_freq.get(last_triplet, 0)
+
+    max_pair_freq = max(st.session_state.pair_freq.values()) if st.session_state.pair_freq else 1
+    max_triplet_freq = max(st.session_state.triplet_freq.values()) if st.session_state.triplet_freq else 1
+
+    normalized_pair_freq = (last_pair_count / max_pair_freq) if max_pair_freq > 0 else 0.0
+    normalized_triplet_freq = (last_triplet_count / max_triplet_freq) if max_triplet_freq > 0 else 0.0
+
+    base_features = [
         mean / 36.0,
         std / 18.0,
         wheel_speed / 36.0,
@@ -141,6 +195,9 @@ def get_advanced_features(sequence):
         len(freq) / len(sequence) if len(sequence) > 0 else 0.0,
         1.0 if last == second_last else 0.0
     ]
+
+    # Concatena novas features
+    return base_features + [normalized_pair_freq, normalized_triplet_freq]
 
 def sequence_to_one_hot(sequence):
     """
@@ -164,7 +221,7 @@ def sequence_to_state(sequence, model=None):
     Retorna estado 1D para o DQN: [one_hot_seq.flatten(), features, num_probs, color_probs, dozen_probs]
     """
     one_hot_seq = sequence_to_one_hot(sequence)  # (SEQ, 37)
-    features = get_advanced_features(sequence[-SEQUENCE_LEN:]) if sequence else [0.0]*8
+    features = get_advanced_features(sequence[-SEQUENCE_LEN:]) if sequence else [0.0]*FEATURE_DIM
 
     # default probs
     num_probs = np.zeros(NUM_TOTAL)
@@ -220,8 +277,8 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     x = BatchNormalization()(x)
     x = Dropout(0.25)(x)
 
-    # Features adicionais
-    feat_input = Input(shape=(8,), name='features_input')
+    # Features adicionais (agora FEATURE_DIM)
+    feat_input = Input(shape=(FEATURE_DIM,), name='features_input')
     dense_feat = Dense(48, activation='swish')(feat_input)
     dense_feat = BatchNormalization()(dense_feat)
     dense_feat = Dropout(0.2)(dense_feat)
@@ -529,9 +586,8 @@ def train_lstm_on_recent_minibatch(model, history):
         logger.error(f"Erro no treinamento LSTM: {e}")
 
 # --- UI ---
-# --- UI ---
 st.set_page_config(layout="centered")
-st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (REVISADO + REWARD / TREINO RECENTE)")
+st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (Refinado: Pares/Trincas + Reward + Mini-batches)")
 
 st.markdown("### Inserir histórico manualmente (ex: 0,32,15,19,4,21)")
 
@@ -549,7 +605,7 @@ if st.session_state.clear_input_bulk:
 # 3) Criar o text_area
 input_bulk = st.text_area("Cole números separados por vírgula", key="input_bulk")
 
-# 4) Botão para adicionar histórico
+# 4) Botão para adicionar histórico (com atualização de pares/trincas)
 if st.button("Adicionar histórico"):
     if st.session_state.input_bulk and st.session_state.input_bulk.strip():
         try:
@@ -558,17 +614,22 @@ if st.button("Adicionar histórico"):
                 for x in st.session_state.input_bulk.split(",")
                 if x.strip().isdigit() and 0 <= int(x.strip()) <= 36
             ]
-            st.session_state.history.extend(new_nums)
-            st.success(f"Adicionados {len(new_nums)} números ao histórico.")
+            if new_nums:
+                prev_len = len(st.session_state.history)
+                st.session_state.history.extend(new_nums)
+                # atualiza contadores somente para a faixa recém adicionada
+                update_pair_triplet_counters_from(st.session_state.history, max(prev_len, 0))
+                st.success(f"Adicionados {len(new_nums)} números ao histórico.")
+            else:
+                st.warning("Nenhum número válido encontrado (0–36).")
+
             # Sinaliza para limpar NA PRÓXIMA EXECUÇÃO
             st.session_state.clear_input_bulk = True
-            st.rerun()  # use isto no lugar de st.experimental_rerun()
+            st.rerun()
         except Exception as e:
             st.error(f"Erro ao processar números: {e}")
     else:
         st.warning("Insira números válidos para adicionar.")
-
-
 
 st.markdown("---")
 
@@ -582,6 +643,8 @@ if st.session_state.last_input is not None:
     try:
         num = int(st.session_state.last_input)
         st.session_state.history.append(num)
+        # Atualiza contadores com o novo final do histórico
+        update_pair_triplet_counters_from(st.session_state.history, len(st.session_state.history)-1)
         logger.info(f"Número novo inserido pelo usuário: {num}")
         st.session_state.last_input = None
 
@@ -592,16 +655,13 @@ if st.session_state.last_input is not None:
             logger.info("Agente DQN criado")
 
         # ===== PROCESSAMENTO DQN / RECOMPENSA =====
-        # Agora usamos as AÇÕES QUE FORAM TOMADAS NO PASSO ANTERIOR (com exploração)
         if st.session_state.prev_state is not None and st.session_state.prev_actions is not None:
             agent = st.session_state.dqn_agent
-            # Recompensa escalonada, calculada sobre a lista de ações tomadas anteriormente
             reward = compute_reward(st.session_state.prev_actions, num, bet_amount=BET_AMOUNT,
                                     max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD)
             next_state = sequence_to_state(st.session_state.history, st.session_state.model)
 
             if agent is not None:
-                # Guarda experiência usando a ação principal (primeira do top_k)
                 agent.remember(st.session_state.prev_state, st.session_state.prev_actions[0], reward, next_state, False)
                 logger.info(f"Memorizado: ações={st.session_state.prev_actions}, resultado={num}, recompensa={reward}")
 
@@ -637,7 +697,7 @@ if st.session_state.last_input is not None:
             # Atualiza prev_state com base no novo histórico/modelo
             st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model)
 
-            # Previsões para mostrar e também para possível integração com DQN (se desejar)
+            # Previsões
             pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
 
             if pred_info:
@@ -649,7 +709,6 @@ if st.session_state.last_input is not None:
                 st.write(f"Cor mais provável: **{color_names.get(pred_info['color_pred'],'-')}** — probs: {pred_info['color_probs']}")
                 st.write(f"Dúzia mais provável: **{dozen_names.get(pred_info['dozen_pred'],'-')}** — probs: {pred_info['dozen_probs']}")
         else:
-            # Se modelo ainda não existe, atualiza prev_state simples
             st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model)
 
     except Exception as e:
@@ -666,7 +725,7 @@ if state is not None and agent is None:
     logger.info("Agente DQN criado (depois de estado)")
 
 if agent is not None and state is not None:
-    # Agora com exploração ligada (use_epsilon=True)
+    # exploração ligada
     top_actions = agent.act_top_k(state, k=3, use_epsilon=True)
 else:
     top_actions = random.sample(range(NUM_TOTAL), 3)
@@ -688,4 +747,3 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
-
