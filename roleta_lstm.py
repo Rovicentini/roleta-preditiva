@@ -313,7 +313,7 @@ def optimal_neighbors(number, max_neighbors=2):
 def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
                    max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD):
     reward = 0.0
-    action_numbers = list(set([a for a a in action_numbers if 0 <= a <= 36]))
+    action_numbers = set(a for a in action_numbers if 0 <= a <= 36)
     if outcome_number in action_numbers:
         reward = REWARD_EXACT
     elif max_neighbors_for_reward > 0:
@@ -574,3 +574,4 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
