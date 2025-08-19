@@ -1,4 +1,3 @@
-# app_final.py
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -8,6 +7,9 @@ import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Dropout, Attention, BatchNormalization
 from tensorflow.keras.optimizers import Nadam, Adam
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.utils import to_categorical
+
 from collections import Counter, deque
 import random
 import logging
@@ -53,36 +55,24 @@ if 'triplet_freq' not in st.session_state:
 NUM_TOTAL = 37
 SEQUENCE_LEN = 20
 BET_AMOUNT = 1.0
-
-# Dimensão das features avançadas
 FEATURE_DIM = 10
-
-# Replay/treino DQN
 TARGET_UPDATE_FREQ = 50
 REPLAY_BATCH = 64
 REPLAY_SIZE = 5000
 DQN_TRAIN_EVERY = 5
 DQN_LEARNING_RATE = 1e-3
 DQN_GAMMA = 0.95
-
-# Recompensa (shaping)
 REWARD_EXACT = 35.0
 REWARD_NEIGHBOR = 8.0
 REWARD_LOSS = -15.0
 NEIGHBOR_RADIUS_FOR_REWARD = 1
-
-# Treino LSTM incremental
 LSTM_RECENT_WINDOWS = 400
 LSTM_BATCH_SAMPLES = 128
 LSTM_EPOCHS_PER_STEP = 2
 LSTM_BATCH_SIZE = 32
-
-# Hiperparâmetros DQN (exploração)
 EPSILON_START = 1.0
 EPSILON_MIN = 0.05
 EPSILON_DECAY = 0.992
-
-# wheel order
 WHEEL_ORDER = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,
                5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26]
 WHEEL_DISTANCE = [[min(abs(i-j), 37-abs(i-j)) for j in range(37)] for i in range(37)]
@@ -114,7 +104,6 @@ def number_to_dozen(n):
     return 3
 
 def get_advanced_features(sequence):
-    # (sem mudanças)
     if sequence is None or len(sequence) < 2:
         return [0.0] * FEATURE_DIM
     seq = np.array(sequence)
@@ -122,7 +111,6 @@ def get_advanced_features(sequence):
     std = np.std(seq)
     last = int(sequence[-1])
     second_last = int(sequence[-2])
-    # ... resto da lógica de features ...
     if last in WHEEL_ORDER and second_last in WHEEL_ORDER:
         last_pos = WHEEL_ORDER.index(last)
         second_last_pos = WHEEL_ORDER.index(second_last)
@@ -171,7 +159,7 @@ def sequence_to_one_hot(sequence):
     for x in seq_padded:
         if x in WHEEL_ORDER:
             pos = WHEEL_ORDER.index(x)
-            one_hot_seq.append(np.array([1 if i == pos else 0 for i in range(NUM_TOTAL)]))
+            one_hot_seq.append(to_categorical(pos, NUM_TOTAL))
         else:
             one_hot_seq.append(np.zeros(NUM_TOTAL))
     return np.array(one_hot_seq)
@@ -200,15 +188,12 @@ def sequence_to_state(sequence, model=None):
     state = np.concatenate([one_hot_seq.flatten(), np.array(features), num_probs, color_probs, dozen_probs]).astype(np.float32)
     return state
 
-# ... [O resto das funções auxiliares como build_deep_learning_model, DQNAgent, optimal_neighbors, compute_reward, predict_next_numbers e as funções de treino do LSTM] ...
-
 def build_deep_learning_model():
-    # ... (código da função) ...
     seq_input = Input(shape=(SEQUENCE_LEN, NUM_TOTAL), name='sequence_input')
-    x = LSTM(128, return_sequences=True, kernel_regularizer=tf.keras.regularizers.l2(1e-4))(seq_input)
+    x = LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4))(seq_input)
     x = BatchNormalization()(x)
     x = Dropout(0.3)(x)
-    x = LSTM(96, return_sequences=True, kernel_regularizer=tf.keras.regularizers.l2(1e-4))(x)
+    x = LSTM(96, return_sequences=True, kernel_regularizer=l2(1e-4))(x)
     x = BatchNormalization()(x)
     x = Dropout(0.25)(x)
     x_att = Attention(name="self_attention")([x, x])
@@ -237,7 +222,6 @@ def build_deep_learning_model():
     return model
 
 class DQNAgent:
-    # ... (código da classe) ...
     def __init__(self, state_size, action_size, lr=DQN_LEARNING_RATE, gamma=DQN_GAMMA, replay_size=REPLAY_SIZE):
         self.state_size = int(state_size)
         self.action_size = action_size
@@ -285,7 +269,7 @@ class DQNAgent:
             return top_k_actions.tolist()
         except Exception:
             return random.sample(range(self.action_size), k)
-
+    
     def replay(self, batch_size=REPLAY_BATCH):
         if len(self.memory) < batch_size:
             return
@@ -393,7 +377,6 @@ def predict_next_numbers(model, history, top_k=3):
     }
 
 def build_lstm_supervised_from_history(history):
-    # ... (código da função) ...
     X_seq, X_feat, y_num, y_color, y_dozen = [], [], [], [], []
     if len(history) <= SEQUENCE_LEN:
         return None
@@ -405,13 +388,13 @@ def build_lstm_supervised_from_history(history):
         X_feat.append(get_advanced_features(seq_slice))
         if target in WHEEL_ORDER:
             pos = WHEEL_ORDER.index(target)
-            y_num.append(np.array([1 if i == pos else 0 for i in range(NUM_TOTAL)]))
+            y_num.append(to_categorical(pos, NUM_TOTAL))
         else:
             y_num.append(np.zeros(NUM_TOTAL))
         color_label = number_to_color(target)
-        y_color.append(np.array([1 if i == color_label else 0 for i in range(3)]))
+        y_color.append(to_categorical(color_label, 3))
         dozen_label = number_to_dozen(target)
-        y_dozen.append(np.array([1 if i == dozen_label else 0 for i in range(4)]))
+        y_dozen.append(to_categorical(dozen_label, 4))
     if len(X_seq) == 0:
         return None
     X_seq = np.array(X_seq)
@@ -500,13 +483,6 @@ def process_new_number(num):
         with st.spinner("Treinando LSTM com mini-batches recentes..."):
             train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
 
-    if st.session_state.model is not None:
-        pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
-        st.subheader("🎯 Previsões (LSTM + pós-processamento)")
-        if pred_info:
-            for n, conf in pred_info['top_numbers']:
-                st.write(f"Número: **{n}** — Prob: {conf:.2%}")
-
     st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model)
     st.session_state.last_input = None
 
@@ -564,7 +540,15 @@ if st.session_state.last_input is not None:
 
 st.markdown("---")
 
-# ===== SUGESTÕES DQN (AÇÕES ATUAIS) =====
+# Se o modelo LSTM existe, exibe as previsões
+if st.session_state.model is not None:
+    pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
+    st.subheader("🎯 Previsões (LSTM + pós-processamento)")
+    if pred_info:
+        for n, conf in pred_info['top_numbers']:
+            st.write(f"Número: **{n}** — Prob: {conf:.2%}")
+
+# Exibe as sugestões DQN (sempre, já que a lógica de treino é incremental)
 state = sequence_to_state(st.session_state.history, st.session_state.model)
 agent = st.session_state.dqn_agent
 
