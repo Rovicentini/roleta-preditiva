@@ -419,45 +419,37 @@ def optimal_neighbors(number, max_neighbors=2):
     return list(dict.fromkeys(neigh))
 
 # =========================
-# RECOMPENSA ESCALONADA
+# RECOMPENSA FOCADA NA PRECISÃO NUMÉRICA
 # =========================
 def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
                    max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD):
     """
-    Recompensa escalonada:
-      +35  acerto exato
-      +5   acerto vizinho (raio 1 por padrão)
-      +1   acerto de cor
-      +1   acerto de dúzia
-      -1   perda completa
+    Nova lógica de recompensa:
+    - Recompensa Máxima para acerto no número exato.
+    - Recompensa Intermediária para acerto em vizinhos.
+    - Penalidade para qualquer erro.
     """
     reward = 0.0
     action_numbers = list(set([a for a in action_numbers if 0 <= a <= 36]))
 
-    # Exato
+    # Se o número sorteado está entre os apostados, é uma recompensa exata
     if outcome_number in action_numbers:
-        reward += REWARD_EXACT
-
-    # Vizinhos
-    if reward < REWARD_EXACT and max_neighbors_for_reward > 0:
+        reward = REWARD_EXACT
+    
+    # Se não acertou o número exato, checa se acertou um vizinho.
+    # Usamos "elif" para garantir que a recompensa de vizinho só seja dada se não houver acerto exato.
+    elif max_neighbors_for_reward > 0:
         all_neighbors = set()
         for a in action_numbers:
             all_neighbors.update(optimal_neighbors(a, max_neighbors=max_neighbors_for_reward))
+        
         if outcome_number in all_neighbors:
-            reward += REWARD_NEIGHBOR
+            reward = REWARD_NEIGHBOR
 
-    # Cor
-    colors_action = set([number_to_color(a) for a in action_numbers])
-    if number_to_color(outcome_number) in colors_action and outcome_number != 0:
-        reward += REWARD_COLOR
-
-    # Dúzia
-    dozens_action = set([number_to_dozen(a) for a in action_numbers])
-    if number_to_dozen(outcome_number) in dozens_action and outcome_number != 0:
-        reward += REWARD_DOZEN
-
+    # Se nenhuma das condições acima foi satisfeita, a aposta falhou completamente.
+    # A recompensa continua 0.0, então aplicamos a penalidade.
     if reward == 0.0:
-        reward += REWARD_LOSS
+        reward = REWARD_LOSS
 
     return reward * bet_amount
 
@@ -747,3 +739,4 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
