@@ -58,7 +58,7 @@ BET_AMOUNT = 1.0
 
 # Replay/treino DQN
 TARGET_UPDATE_FREQ = 50
-REPLAY_BATCH = 64
+REPLAY_BATCH = 100
 REPLAY_SIZE = 5000
 DQN_TRAIN_EVERY = 5
 DQN_LEARNING_RATE = 1e-3
@@ -67,9 +67,9 @@ DQN_GAMMA = 0.95
 # Recompensa (shaping)
 REWARD_EXACT = 35.0
 REWARD_NEIGHBOR = 5.0
-REWARD_COLOR = 1.0
-REWARD_DOZEN = 1.0
-REWARD_LOSS = -1.0
+REWARD_COLOR = 0.0
+REWARD_DOZEN = 0.0
+REWARD_LOSS = -15.0
 NEIGHBOR_RADIUS_FOR_REWARD = 1   # vizinhos diretos
 
 # Treino LSTM incremental
@@ -161,22 +161,21 @@ def sequence_to_one_hot(sequence):
 
 def sequence_to_state(sequence, model=None):
     """
-    Retorna estado 1D para o DQN: [one_hot_seq.flatten(), features, num_probs, color_probs, dozen_probs]
+    Retorna estado 1D para o DQN: [one_hot_seq.flatten(), features, num_probs, color_probs, dozen_probs, age_vector]
     """
     one_hot_seq = sequence_to_one_hot(sequence)  # (SEQ, 37)
     features = get_advanced_features(sequence[-SEQUENCE_LEN:]) if sequence else [0.0]*8
 
     # default probs
     num_probs = np.zeros(NUM_TOTAL)
-    color_probs = np.zeros(3)   # [zero, red, black]
-    dozen_probs = np.zeros(4)   # [zero, d1, d2, d3]
+    color_probs = np.zeros(3)    # [zero, red, black]
+    dozen_probs = np.zeros(4)    # [zero, d1, d2, d3]
 
     if model is not None and len(sequence) >= SEQUENCE_LEN:
         try:
             seq_arr = np.expand_dims(one_hot_seq, axis=0)  # (1, SEQ, 37)
             feat_arr = np.array([features])
             raw = model.predict([seq_arr, feat_arr], verbose=0)
-            # when model has multiple outputs: raw is list [num_out, color_out, dozen_out]
             if isinstance(raw, list) and len(raw) == 3:
                 num_probs = np.array(raw[0][0])
                 color_probs = np.array(raw[1][0])
@@ -188,7 +187,26 @@ def sequence_to_state(sequence, model=None):
         except Exception:
             num_probs = np.zeros(NUM_TOTAL)
 
-    state = np.concatenate([one_hot_seq.flatten(), np.array(features), num_probs, color_probs, dozen_probs]).astype(np.float32)
+    # Calcule a "idade" (quantos passos cada numero nao aparece)
+    age_vector = [0] * NUM_TOTAL
+    last_seen = {}
+    for i, num in enumerate(sequence):
+        last_seen[num] = i
+    
+    for num in range(NUM_TOTAL):
+        if num in last_seen:
+            age_vector[num] = len(sequence) - 1 - last_seen[num]
+        else:
+            age_vector[num] = len(sequence)
+    
+    # Normalize o vetor de idade
+    max_age = max(age_vector) if age_vector else 1
+    age_vector = [age / max_age for age in age_vector]
+    age_vector = np.array(age_vector)
+
+    # Combine todos os vetores para formar o estado
+    state = np.concatenate([one_hot_seq.flatten(), np.array(features), num_probs, color_probs, dozen_probs, age_vector]).astype(np.float32)
+    
     return state
 
 # =========================
@@ -311,34 +329,52 @@ class DQNAgent:
             return random.randrange(self.action_size)
 
     def replay(self, batch_size=REPLAY_BATCH):
-        if len(self.memory) < batch_size:
-            return
-        batch = random.sample(self.memory, batch_size)
-        states = np.array([b[0] for b in batch])
-        next_states = np.array([b[3] for b in batch])
-        if states.size == 0 or next_states.size == 0:
-            return
-        try:
-            q_next = self.target_model.predict(next_states, verbose=0)
-            q_curr = self.model.predict(states, verbose=0)
-        except Exception:
-            return
-        X, Y = [], []
-        for i, (state, action, reward, next_state, done) in enumerate(batch):
-            target = q_curr[i].copy()
+    if len(self.memory) < batch_size:
+        return
+    
+    batch = random.sample(self.memory, batch_size)
+    
+    # Preparar dados para o modelo (o estado é o mesmo para todas as ações)
+    states = np.array([b[0] for b in batch])
+    next_states = np.array([b[3] for b in batch])
+    
+    if states.size == 0 or next_states.size == 0:
+        return
+    
+    try:
+        # Previsões para o próximo estado (Q-learning)
+        q_next = self.target_model.predict(next_states, verbose=0)
+        # Previsões para o estado atual
+        q_curr = self.model.predict(states, verbose=0)
+    except Exception:
+        return
+
+    # Construir os lotes de treinamento
+    X, Y = [], []
+    for i, (state, actions, reward, next_state, done) in enumerate(batch):
+        target = q_curr[i].copy()
+        
+        # O loop principal para ajustar o Q-value de cada ação do lote
+        for action in actions:
             if done:
+                # Se o jogo terminou, a recompensa é o valor final
                 target[action] = reward
             else:
+                # Caso contrário, aplica a equação de Bellman
                 next_q = q_next[i] if i < len(q_next) else np.zeros(self.action_size)
                 target[action] = reward + self.gamma * np.max(next_q)
-            X.append(state)
-            Y.append(target)
-        try:
-            self.model.fit(np.array(X), np.array(Y), epochs=1, verbose=0)
-        except Exception:
-            pass
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+        
+        X.append(state)
+        Y.append(target)
+    
+    try:
+        self.model.fit(np.array(X), np.array(Y), epochs=1, verbose=0)
+    except Exception as e:
+        logger.error(f"Erro no treinamento do DQN: {e}")
+        pass
+        
+    if self.epsilon > self.epsilon_min:
+        self.epsilon *= self.epsilon_decay
 
     def load(self, path):
         self.model.load_weights(path)
@@ -364,43 +400,32 @@ def optimal_neighbors(number, max_neighbors=2):
 # =========================
 # RECOMPENSA ESCALONADA
 # =========================
+# =========================
+# RECOMPENSA FOCADA E SIMPLIFICADA
+# =========================
 def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
                    max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD):
     """
-    Recompensa escalonada:
-      +35  acerto exato
-      +5   acerto vizinho (raio 1 por padrão)
-      +1   acerto de cor
-      +1   acerto de dúzia
-      -1   perda completa
+    Recompensa focada: apenas premia acerto de número ou vizinho.
+    Perda em todos os outros casos.
     """
     reward = 0.0
-    action_numbers = list(set([a for a in action_numbers if 0 <= a <= 36]))
+    action_numbers = set([a for a in action_numbers if 0 <= a <= 36])
 
-    # Exato
+    # 1. Acerto Exato (maior recompensa e prioridade)
     if outcome_number in action_numbers:
-        reward += REWARD_EXACT
-
-    # Vizinhos
-    if reward < REWARD_EXACT and max_neighbors_for_reward > 0:
+        reward = REWARD_EXACT
+    # 2. Acerto Vizinho (recompensa menor)
+    else:
         all_neighbors = set()
         for a in action_numbers:
             all_neighbors.update(optimal_neighbors(a, max_neighbors=max_neighbors_for_reward))
+        
         if outcome_number in all_neighbors:
-            reward += REWARD_NEIGHBOR
-
-    # Cor
-    colors_action = set([number_to_color(a) for a in action_numbers])
-    if number_to_color(outcome_number) in colors_action and outcome_number != 0:
-        reward += REWARD_COLOR
-
-    # Dúzia
-    dozens_action = set([number_to_dozen(a) for a in action_numbers])
-    if number_to_dozen(outcome_number) in dozens_action and outcome_number != 0:
-        reward += REWARD_DOZEN
-
-    if reward == 0.0:
-        reward += REWARD_LOSS
+            reward = REWARD_NEIGHBOR
+        # 3. Perda total (penalidade)
+        else:
+            reward = REWARD_LOSS
 
     return reward * bet_amount
 
@@ -602,7 +627,7 @@ if st.session_state.last_input is not None:
 
             if agent is not None:
                 # Guarda experiência usando a ação principal (primeira do top_k)
-                agent.remember(st.session_state.prev_state, st.session_state.prev_actions[0], reward, next_state, False)
+                agent.remember(st.session_state.prev_state, st.session_state.prev_actions, reward, next_state, False)
                 logger.info(f"Memorizado: ações={st.session_state.prev_actions}, resultado={num}, recompensa={reward}")
 
             # Estatísticas
@@ -688,3 +713,4 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
