@@ -70,7 +70,7 @@ REWARD_NEIGHBOR = 5.0
 REWARD_COLOR = 0.0
 REWARD_DOZEN = 0.0
 REWARD_LOSS = -15.0
-NEIGHBOR_RADIUS_FOR_REWARD = 1   # vizinhos diretos
+NEIGHBOR_RADIUS_FOR_REWARD = 3   # vizinhos diretos
 
 # Treino LSTM incremental
 LSTM_RECENT_WINDOWS = 400   # janelas recentes consideradas
@@ -714,6 +714,7 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
 
 
 
