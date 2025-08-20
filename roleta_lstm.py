@@ -328,7 +328,7 @@ class DQNAgent:
         except Exception:
             return random.randrange(self.action_size)
 
-def replay(self, batch_size=REPLAY_BATCH):
+    def replay(self, batch_size=REPLAY_BATCH):
         if len(self.memory) < batch_size:
             return
         
@@ -713,5 +713,6 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
 
 
