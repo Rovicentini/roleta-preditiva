@@ -328,53 +328,53 @@ class DQNAgent:
         except Exception:
             return random.randrange(self.action_size)
 
-    def replay(self, batch_size=REPLAY_BATCH):
-    if len(self.memory) < batch_size:
-        return
-    
-    batch = random.sample(self.memory, batch_size)
-    
-    # Preparar dados para o modelo (o estado é o mesmo para todas as ações)
-    states = np.array([b[0] for b in batch])
-    next_states = np.array([b[3] for b in batch])
-    
-    if states.size == 0 or next_states.size == 0:
-        return
-    
-    try:
-        # Previsões para o próximo estado (Q-learning)
-        q_next = self.target_model.predict(next_states, verbose=0)
-        # Previsões para o estado atual
-        q_curr = self.model.predict(states, verbose=0)
-    except Exception:
-        return
+def replay(self, batch_size=REPLAY_BATCH):
+        if len(self.memory) < batch_size:
+            return
+        
+        batch = random.sample(self.memory, batch_size)
+        
+        # Preparar dados para o modelo (o estado é o mesmo para todas as ações)
+        states = np.array([b[0] for b in batch])
+        next_states = np.array([b[3] for b in batch])
+        
+        if states.size == 0 or next_states.size == 0:
+            return
+        
+        try:
+            # Previsões para o próximo estado (Q-learning)
+            q_next = self.target_model.predict(next_states, verbose=0)
+            # Previsões para o estado atual
+            q_curr = self.model.predict(states, verbose=0)
+        except Exception:
+            return
 
-    # Construir os lotes de treinamento
-    X, Y = [], []
-    for i, (state, actions, reward, next_state, done) in enumerate(batch):
-        target = q_curr[i].copy()
+        # Construir os lotes de treinamento
+        X, Y = [], []
+        for i, (state, actions, reward, next_state, done) in enumerate(batch):
+            target = q_curr[i].copy()
+            
+            # O loop principal para ajustar o Q-value de cada ação do lote
+            for action in actions:
+                if done:
+                    # Se o jogo terminou, a recompensa é o valor final
+                    target[action] = reward
+                else:
+                    # Caso contrário, aplica a equação de Bellman
+                    next_q = q_next[i] if i < len(q_next) else np.zeros(self.action_size)
+                    target[action] = reward + self.gamma * np.max(next_q)
+            
+            X.append(state)
+            Y.append(target)
         
-        # O loop principal para ajustar o Q-value de cada ação do lote
-        for action in actions:
-            if done:
-                # Se o jogo terminou, a recompensa é o valor final
-                target[action] = reward
-            else:
-                # Caso contrário, aplica a equação de Bellman
-                next_q = q_next[i] if i < len(q_next) else np.zeros(self.action_size)
-                target[action] = reward + self.gamma * np.max(next_q)
-        
-        X.append(state)
-        Y.append(target)
-    
-    try:
-        self.model.fit(np.array(X), np.array(Y), epochs=1, verbose=0)
-    except Exception as e:
-        logger.error(f"Erro no treinamento do DQN: {e}")
-        pass
-        
-    if self.epsilon > self.epsilon_min:
-        self.epsilon *= self.epsilon_decay
+        try:
+            self.model.fit(np.array(X), np.array(Y), epochs=1, verbose=0)
+        except Exception as e:
+            logger.error(f"Erro no treinamento do DQN: {e}")
+            pass
+            
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
 
     def load(self, path):
         self.model.load_weights(path)
@@ -713,4 +713,5 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
 
