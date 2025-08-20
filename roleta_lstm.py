@@ -201,6 +201,7 @@ def sequence_to_state(sequence, model=None):
     
     # Normalize o vetor de idade
     max_age = max(age_vector) if age_vector else 1
+    max_age = max(1, max_age) # GARANTE QUE O DENOMINADOR NAO SERA ZERO
     age_vector = [age / max_age for age in age_vector]
     age_vector = np.array(age_vector)
 
@@ -713,6 +714,7 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
 
 
 
