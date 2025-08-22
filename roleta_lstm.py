@@ -1,4 +1,3 @@
-# app_revised.py
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -45,7 +44,7 @@ if 'prev_state' not in st.session_state:
 if 'prev_action' not in st.session_state:
     st.session_state.prev_action = None
 if 'prev_actions' not in st.session_state:
-    st.session_state.prev_actions = None   # << Memória das ações realmente tomadas no passo anterior
+    st.session_state.prev_actions = None
 if 'input_bulk' not in st.session_state:
     st.session_state.input_bulk = ""
 if 'clear_input_bulk' not in st.session_state:
@@ -70,11 +69,11 @@ REWARD_NEIGHBOR = 5.0
 REWARD_COLOR = 0.0
 REWARD_DOZEN = 0.0
 REWARD_LOSS = -15.0
-NEIGHBOR_RADIUS_FOR_REWARD = 3   # vizinhos diretos
+NEIGHBOR_RADIUS_FOR_REWARD = 3
 
 # Treino LSTM incremental
-LSTM_RECENT_WINDOWS = 400   # janelas recentes consideradas
-LSTM_BATCH_SAMPLES = 128    # amostras aleatórias para cada mini-treino
+LSTM_RECENT_WINDOWS = 400
+LSTM_BATCH_SAMPLES = 128
 LSTM_EPOCHS_PER_STEP = 2
 LSTM_BATCH_SIZE = 32
 
@@ -91,8 +90,24 @@ WHEEL_DISTANCE = [[min(abs(i-j), 37-abs(i-j)) for j in range(37)] for i in range
 # red numbers for European wheel (standard)
 RED_NUMBERS = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
 
-# --- AUX FUNCTIONS ---
+# Definindo as principais regiões da roleta
+# Baseado na ordem física da roda europeia
+REGIONS = {
+    "zero_spiel": {0, 32, 15, 19, 4, 21, 2, 25}, # 8 números
+    "voisins_du_zero": {0, 2, 3, 4, 7, 12, 15, 18, 19, 21, 22, 25, 26, 28, 29, 32, 35, 36}, # 17 números (Vizinhos)
+    "tiers_du_cylindre": {27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33}, # 12 números (Terço)
+    "orphelins": {1, 6, 9, 14, 17, 20, 31, 34}, # 8 números (Órfãos)
+    "juego_del_cero": {12, 15, 32, 19, 26, 3, 35, 0},
+    "petite_serie": {5, 8, 10, 11, 13, 16, 23, 24, 27, 30, 33, 36}
+}
 
+# Mapeia cada número para uma (ou mais) região
+NUMBER_TO_REGION = {n: [] for n in range(NUM_TOTAL)}
+for region_name, numbers in REGIONS.items():
+    for num in numbers:
+        NUMBER_TO_REGION[num].append(region_name)
+
+# --- AUX FUNCTIONS ---
 def number_to_color(n):
     if n == 0:
         return 0  # zero
@@ -106,6 +121,14 @@ def number_to_dozen(n):
     if 13 <= n <= 24:
         return 2
     return 3
+
+def number_to_region(n):
+    """Retorna o índice da primeira região que o número pertence.
+    Retorna -1 se não pertencer a nenhuma região definida."""
+    for i, region_name in enumerate(REGIONS):
+        if n in REGIONS[region_name]:
+            return i
+    return -1
 
 def get_advanced_features(sequence):
     if sequence is None or len(sequence) < 2:
@@ -157,57 +180,135 @@ def sequence_to_one_hot(sequence):
             one_hot_seq.append(to_categorical(pos, NUM_TOTAL))
         else:
             one_hot_seq.append(np.zeros(NUM_TOTAL))
-    return np.array(one_hot_seq)  # shape (SEQUENCE_LEN, NUM_TOTAL)
+    return np.array(one_hot_seq)
 
 def sequence_to_state(sequence, model=None):
     """
-    Retorna estado 1D para o DQN: [one_hot_seq.flatten(), features, num_probs, color_probs, dozen_probs, age_vector]
+    Retorna estado 1D para o DQN: [one_hot_seq.flatten(), features, num_probs, color_probs, dozen_probs, age_vector, new_features]
     """
-    one_hot_seq = sequence_to_one_hot(sequence)  # (SEQ, 37)
-    features = get_advanced_features(sequence[-SEQUENCE_LEN:]) if sequence else [0.0]*8
+    seq_slice = sequence[-SEQUENCE_LEN:] if sequence else []
 
-    # default probs
+    # 1. Base State Features (mantidas)
+    one_hot_seq = sequence_to_one_hot(seq_slice)
+    features = get_advanced_features(seq_slice)
+    
+    # 2. LSTM Prediction Probabilities (mantidas)
     num_probs = np.zeros(NUM_TOTAL)
-    color_probs = np.zeros(3)    # [zero, red, black]
-    dozen_probs = np.zeros(4)    # [zero, d1, d2, d3]
-
+    color_probs = np.zeros(3)
+    dozen_probs = np.zeros(4)
     if model is not None and len(sequence) >= SEQUENCE_LEN:
         try:
-            seq_arr = np.expand_dims(one_hot_seq, axis=0)  # (1, SEQ, 37)
+            seq_arr = np.expand_dims(one_hot_seq, axis=0)
             feat_arr = np.array([features])
             raw = model.predict([seq_arr, feat_arr], verbose=0)
             if isinstance(raw, list) and len(raw) == 3:
                 num_probs = np.array(raw[0][0])
                 color_probs = np.array(raw[1][0])
                 dozen_probs = np.array(raw[2][0])
-            else:
-                out = np.array(raw)
-                if out.shape[-1] == NUM_TOTAL:
-                    num_probs = out[0]
         except Exception:
-            num_probs = np.zeros(NUM_TOTAL)
+            pass
 
-    # Calcule a "idade" (quantos passos cada numero nao aparece)
+    # 3. Vetor de Idade (mantido e normalizado)
     age_vector = [0] * NUM_TOTAL
-    last_seen = {}
-    for i, num in enumerate(sequence):
-        last_seen[num] = i
-    
+    last_seen = {num: i for i, num in enumerate(sequence)}
     for num in range(NUM_TOTAL):
         if num in last_seen:
             age_vector[num] = len(sequence) - 1 - last_seen[num]
         else:
             age_vector[num] = len(sequence)
-    
-    # Normalize o vetor de idade
     max_age = max(age_vector) if age_vector else 1
-    max_age = max(1, max_age) # GARANTE QUE O DENOMINADOR NAO SERA ZERO
-    age_vector = [age / max_age for age in age_vector]
+    age_vector = [age / max(1, max_age) for age in age_vector]
     age_vector = np.array(age_vector)
 
-    # Combine todos os vetores para formar o estado
-    state = np.concatenate([one_hot_seq.flatten(), np.array(features), num_probs, color_probs, dozen_probs, age_vector]).astype(np.float32)
+    # ==================================
+    # === NOVAS FEATURES ADICIONADAS ===
+    # ==================================
     
+    # Nova Feature 1: Run Length Encoding (Streaks e Alternâncias)
+    # Apenas para o último número, cor e dúzia
+    last_run_len_num = 0
+    if len(sequence) >= 2:
+        for i in range(1, len(sequence)):
+            if sequence[-i] == sequence[-1]:
+                last_run_len_num = i
+            else:
+                break
+    last_run_len_color = 0
+    if len(sequence) >= 2:
+        last_color = number_to_color(sequence[-1])
+        for i in range(1, len(sequence)):
+            if number_to_color(sequence[-i]) == last_color:
+                last_run_len_color = i
+            else:
+                break
+    last_run_len_dozen = 0
+    if len(sequence) >= 2:
+        last_dozen = number_to_dozen(sequence[-1])
+        for i in range(1, len(sequence)):
+            if number_to_dozen(sequence[-i]) == last_dozen:
+                last_run_len_dozen = i
+            else:
+                break
+    run_length_features = np.array([last_run_len_num / SEQUENCE_LEN, last_run_len_color / SEQUENCE_LEN, last_run_len_dozen / SEQUENCE_LEN])
+    
+    # Nova Feature 2: Grupos do Último Número (One-hot para Cor e Dúzia)
+    last_num = sequence[-1] if sequence else -1
+    last_color_one_hot = to_categorical(number_to_color(last_num), 3) if last_num in range(NUM_TOTAL) else np.zeros(3)
+    last_dozen_one_hot = to_categorical(number_to_dozen(last_num), 4) if last_num in range(NUM_TOTAL) else np.zeros(4)
+    
+    # Nova Feature 3: Proporções de Par/Ímpar e Alto/Baixo
+    recent_seq = seq_slice
+    even_count = sum(1 for n in recent_seq if n % 2 == 0 and n != 0)
+    odd_count = sum(1 for n in recent_seq if n % 2 != 0)
+    high_count = sum(1 for n in recent_seq if n >= 19 and n <= 36)
+    low_count = sum(1 for n in recent_seq if n >= 1 and n <= 18)
+    total_non_zero = even_count + odd_count
+    
+    even_odd_ratio = even_count / max(1, total_non_zero)
+    high_low_ratio = high_count / max(1, high_count + low_count)
+    
+    group_ratio_features = np.array([even_odd_ratio, high_low_ratio])
+    
+    # NOVAS FEATURES DE REGIÕES DA RODA
+    num_regions = len(REGIONS)
+    last_region_one_hot = np.zeros(num_regions)
+    region_proportions = np.zeros(num_regions)
+    region_streak = 0
+    
+    # Calcula proporções de regiões e streak
+    if len(recent_seq) > 0:
+        region_counts = Counter(number_to_region(n) for n in recent_seq)
+        for i in range(num_regions):
+            region_proportions[i] = region_counts.get(i, 0) / len(recent_seq)
+
+        last_region = number_to_region(recent_seq[-1])
+        if last_region != -1:
+            last_region_one_hot[last_region] = 1
+            for i in range(1, len(recent_seq) + 1):
+                if number_to_region(recent_seq[-i]) == last_region:
+                    region_streak += 1
+                else:
+                    break
+    
+    region_streak_norm = region_streak / SEQUENCE_LEN
+    
+    # Combine todos os vetores para formar o estado final
+    state = np.concatenate([
+        one_hot_seq.flatten(),
+        np.array(features),
+        num_probs,
+        color_probs,
+        dozen_probs,
+        age_vector,
+        run_length_features,
+        last_color_one_hot,
+        last_dozen_one_hot,
+        group_ratio_features,
+        last_region_one_hot,
+        region_proportions,
+        np.array([region_streak_norm])
+    ]).astype(np.float32)
+
     return state
 
 # =========================
@@ -252,8 +353,8 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     dense = Dropout(0.3)(dense)
 
     out_num = Dense(num_total, activation='softmax', name='num_out')(dense)
-    out_color = Dense(3, activation='softmax', name='color_out')(dense)   # zero/red/black
-    out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)   # zero,d1,d2,d3
+    out_color = Dense(3, activation='softmax', name='color_out')(dense)  # zero/red/black
+    out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)  # zero,d1,d2,d3
 
     model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen])
     optimizer = Nadam(learning_rate=4e-4)
@@ -399,9 +500,6 @@ def optimal_neighbors(number, max_neighbors=2):
     return list(dict.fromkeys(neigh))
 
 # =========================
-# RECOMPENSA ESCALONADA
-# =========================
-# =========================
 # RECOMPENSA FOCADA E SIMPLIFICADA
 # =========================
 def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
@@ -475,8 +573,8 @@ def predict_next_numbers(model, history, top_k=3):
     weighted /= weighted.sum()
 
     top_indices = list(np.argsort(weighted)[-top_k:][::-1])
-    color_pred = int(np.argmax(color_probs))  # 0 zero,1 red,2 black
-    dozen_pred = int(np.argmax(dozen_probs))  # 0 zero,1 d1,2 d2,3 d3
+    color_pred = int(np.argmax(color_probs))
+    dozen_pred = int(np.argmax(dozen_probs))
     return {
         'top_numbers': [(int(i), float(weighted[i])) for i in top_indices],
         'num_probs': num_probs,
@@ -555,7 +653,6 @@ def train_lstm_on_recent_minibatch(model, history):
         logger.error(f"Erro no treinamento LSTM: {e}")
 
 # --- UI ---
-# --- UI ---
 st.set_page_config(layout="centered")
 st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (REVISADO + REWARD / TREINO RECENTE)")
 
@@ -569,7 +666,7 @@ if 'clear_input_bulk' not in st.session_state:
 
 # 2) APLICAR LIMPEZA ANTES DE CRIAR O WIDGET
 if st.session_state.clear_input_bulk:
-    st.session_state.input_bulk = ""     # <- agora pode
+    st.session_state.input_bulk = ""
     st.session_state.clear_input_bulk = False
 
 # 3) Criar o text_area
@@ -586,15 +683,12 @@ if st.button("Adicionar histórico"):
             ]
             st.session_state.history.extend(new_nums)
             st.success(f"Adicionados {len(new_nums)} números ao histórico.")
-            # Sinaliza para limpar NA PRÓXIMA EXECUÇÃO
             st.session_state.clear_input_bulk = True
-            st.rerun()  # use isto no lugar de st.experimental_rerun()
+            st.rerun()
         except Exception as e:
             st.error(f"Erro ao processar números: {e}")
     else:
         st.warning("Insira números válidos para adicionar.")
-
-
 
 st.markdown("---")
 
@@ -611,27 +705,21 @@ if st.session_state.last_input is not None:
         logger.info(f"Número novo inserido pelo usuário: {num}")
         st.session_state.last_input = None
 
-        # Cria agente quando possível
         state_example = sequence_to_state(st.session_state.history, st.session_state.model)
         if state_example is not None and (st.session_state.dqn_agent is None):
             st.session_state.dqn_agent = DQNAgent(state_size=state_example.shape[0], action_size=NUM_TOTAL)
             logger.info("Agente DQN criado")
 
-        # ===== PROCESSAMENTO DQN / RECOMPENSA =====
-        # Agora usamos as AÇÕES QUE FORAM TOMADAS NO PASSO ANTERIOR (com exploração)
         if st.session_state.prev_state is not None and st.session_state.prev_actions is not None:
             agent = st.session_state.dqn_agent
-            # Recompensa escalonada, calculada sobre a lista de ações tomadas anteriormente
             reward = compute_reward(st.session_state.prev_actions, num, bet_amount=BET_AMOUNT,
                                     max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD)
             next_state = sequence_to_state(st.session_state.history, st.session_state.model)
 
             if agent is not None:
-                # Guarda experiência usando a ação principal (primeira do top_k)
                 agent.remember(st.session_state.prev_state, st.session_state.prev_actions, reward, next_state, False)
                 logger.info(f"Memorizado: ações={st.session_state.prev_actions}, resultado={num}, recompensa={reward}")
 
-            # Estatísticas
             st.session_state.stats['bets'] += 1
             st.session_state.stats['profit'] += reward
             if reward > 0:
@@ -649,21 +737,14 @@ if st.session_state.last_input is not None:
                 agent.update_target()
                 logger.info(f"Target DQN atualizado no passo {st.session_state.step_count}")
 
-        # ===== MODELO LSTM =====
-        # Criar modelo LSTM se possível
         if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN*2:
             st.session_state.model = build_deep_learning_model()
             logger.info("Modelo LSTM criado")
 
-        # Treino rápido por mini-batches recentes
         if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN*2:
             with st.spinner("Treinando LSTM com mini-batches recentes..."):
                 train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
-
-            # Atualiza prev_state com base no novo histórico/modelo
             st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model)
-
-            # Previsões para mostrar e também para possível integração com DQN (se desejar)
             pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
 
             if pred_info:
@@ -675,14 +756,12 @@ if st.session_state.last_input is not None:
                 st.write(f"Cor mais provável: **{color_names.get(pred_info['color_pred'],'-')}** — probs: {pred_info['color_probs']}")
                 st.write(f"Dúzia mais provável: **{dozen_names.get(pred_info['dozen_pred'],'-')}** — probs: {pred_info['dozen_probs']}")
         else:
-            # Se modelo ainda não existe, atualiza prev_state simples
             st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model)
 
     except Exception as e:
         logger.exception("Erro inesperado ao processar entrada")
         st.error(f"Erro inesperado: {e}")
 
-# ===== SUGESTÕES DQN (AÇÕES ATUAIS) =====
 state = sequence_to_state(st.session_state.history, st.session_state.model)
 agent = st.session_state.dqn_agent
 
@@ -692,7 +771,6 @@ if state is not None and agent is None:
     logger.info("Agente DQN criado (depois de estado)")
 
 if agent is not None and state is not None:
-    # Agora com exploração ligada (use_epsilon=True)
     top_actions = agent.act_top_k(state, k=3, use_epsilon=True)
 else:
     top_actions = random.sample(range(NUM_TOTAL), 3)
@@ -702,7 +780,6 @@ for action in top_actions:
     neighbors = optimal_neighbors(action, max_neighbors=2)
     st.write(f"Aposte no número: **{action}** | Vizinhos (2 cada lado): {neighbors}")
 
-# salvar estado e as AÇÕES TOMADAS AGORA para cálculo da recompensa no próximo passo
 st.session_state.prev_state = state
 st.session_state.prev_action = top_actions[0] if top_actions else None
 st.session_state.prev_actions = top_actions[:] if top_actions else None
@@ -714,8 +791,3 @@ st.write(f"Vitórias: {st.session_state.stats['wins']}")
 st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
-
-
-
-
-
