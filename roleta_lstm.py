@@ -118,12 +118,12 @@ for region_name, numbers in REGIONS.items():
 # --- AUX FUNCTIONS ---
 def number_to_color(n):
     if n == 0:
-        return 0  # zero
-    return 1 if n in RED_NUMBERS else 2  # 1=red,2=black
+        return 0 # zero
+    return 1 if n in RED_NUMBERS else 2 # 1=red,2=black
 
 def number_to_dozen(n):
     if n == 0:
-        return 0  # zero
+        return 0 # zero
     if 1 <= n <= 12:
         return 1
     if 13 <= n <= 24:
@@ -370,8 +370,8 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     dense = Dropout(0.3)(dense)
 
     out_num = Dense(num_total, activation='softmax', name='num_out')(dense)
-    out_color = Dense(3, activation='softmax', name='color_out')(dense)  # zero/red/black
-    out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)  # zero,d1,d2,d3
+    out_color = Dense(3, activation='softmax', name='color_out')(dense) # zero/red/black
+    out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense) # zero,d1,d2,d3
 
     model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen])
     optimizer = Nadam(learning_rate=4e-4)
