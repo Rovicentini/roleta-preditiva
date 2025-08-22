@@ -118,7 +118,7 @@ PULL_NUMBERS = {
     14: [17, 7],
     15: [9, 5, 35],
     16: [3, 33],
-    17: [17, 20, 7]
+    17: [17, 20, 7],
     18: [2, 22],
     19: [19, 9],  
     20: [17, 7],
@@ -802,4 +802,5 @@ st.write(f"Total de apostas: {st.session_state.stats['bets']}")
 st.write(f"Total gasto: R$ {st.session_state.stats['cost']:.2f}")
 st.write(f"Lucro/Prejuízo: R$ {st.session_state.stats['profit']:.2f}")
 st.write(f"Números no histórico: {len(st.session_state.history)}")
+
 
