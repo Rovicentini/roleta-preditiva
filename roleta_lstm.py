@@ -9,12 +9,10 @@ from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Dropout, At
 from tensorflow.keras.optimizers import Nadam, Adam
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.utils import to_categorical
-import pandas as pd # Adicionado para visualização da tabela
 
 from collections import Counter, deque
 import random
 import logging
-import json
 
 # =========================
 # Utils Streamlit
@@ -51,12 +49,9 @@ if 'input_bulk' not in st.session_state:
     st.session_state.input_bulk = ""
 if 'clear_input_bulk' not in st.session_state:
     st.session_state.clear_input_bulk = False
-# =========================================================================
-# NOVOS ESTADOS PARA A TABELA DE NÚMEROS QUE SE PUXAM (CO-OCORRÊNCIA)
-# =========================================================================
-if 'pull_table' not in st.session_state:
-    # A tabela de co-ocorrência: pull_table[num_anterior][num_atual] = contagem
-    st.session_state.pull_table = {str(i): {str(j): 0 for j in range(37)} for i in range(37)}
+# Nova feature: Matriz de co-ocorrência
+if 'co_occurrence_matrix' not in st.session_state:
+    st.session_state.co_occurrence_matrix = np.zeros((37, 37))
 
 # --- CONSTANTS ---
 NUM_TOTAL = 37
@@ -118,12 +113,12 @@ for region_name, numbers in REGIONS.items():
 # --- AUX FUNCTIONS ---
 def number_to_color(n):
     if n == 0:
-        return 0 # zero
-    return 1 if n in RED_NUMBERS else 2 # 1=red,2=black
+        return 0  # zero
+    return 1 if n in RED_NUMBERS else 2  # 1=red,2=black
 
 def number_to_dozen(n):
     if n == 0:
-        return 0 # zero
+        return 0  # zero
     if 1 <= n <= 12:
         return 1
     if 13 <= n <= 24:
@@ -173,6 +168,16 @@ def get_advanced_features(sequence):
         1.0 if last == second_last else 0.0
     ]
 
+# Nova função para atualizar a matriz de co-ocorrência
+def update_co_occurrence_matrix(matrix, history):
+    if len(history) >= 2:
+        prev_num = history[-2]
+        curr_num = history[-1]
+        # Garante que os números estão dentro do range
+        if 0 <= prev_num < NUM_TOTAL and 0 <= curr_num < NUM_TOTAL:
+            matrix[prev_num][curr_num] += 1
+    return matrix
+
 def sequence_to_one_hot(sequence):
     """
     Retorna array (SEQUENCE_LEN, NUM_TOTAL) com one-hot da posição na roda.
@@ -213,16 +218,11 @@ def sequence_to_state(sequence, model=None):
                 num_probs = np.array(raw[0][0])
                 color_probs = np.array(raw[1][0])
                 dozen_probs = np.array(raw[2][0])
-                
-                # Adicionando verificação de forma
-                if num_probs.shape != (NUM_TOTAL,):
-                    num_probs = np.zeros(NUM_TOTAL)
-                if color_probs.shape != (3,):
-                    color_probs = np.zeros(3)
-                if dozen_probs.shape != (4,):
-                    dozen_probs = np.zeros(4)
-        except Exception as e:
-            # Em caso de erro, os vetores de probabilidade permanecem zeros
+            else:
+                num_probs = np.array(raw)[0]
+                color_probs = np.array([0.0, 0.0, 0.0])
+                dozen_probs = np.array([0.0, 0.0, 0.0, 0.0])
+        except Exception:
             pass
 
     # 3. Vetor de Idade (mantido e normalizado)
@@ -308,6 +308,19 @@ def sequence_to_state(sequence, model=None):
                     break
     
     region_streak_norm = region_streak / SEQUENCE_LEN
+
+    # === NOVA FEATURE: FORÇA DE ATRAÇÃO (PULLING STRENGTH) ===
+    # A matriz de co-ocorrência é atualizada no loop principal
+    last_num_pulling_strength = np.zeros(NUM_TOTAL)
+    if len(sequence) > 0:
+        last_num = sequence[-1]
+        if 0 <= last_num < NUM_TOTAL:
+            # Obtém a linha da matriz correspondente ao último número
+            last_num_pulling_strength = st.session_state.co_occurrence_matrix[last_num, :].copy()
+            # Normaliza a força de atração para evitar valores muito altos
+            total_co_occurrences = np.sum(last_num_pulling_strength)
+            if total_co_occurrences > 0:
+                last_num_pulling_strength /= total_co_occurrences
     
     # Combine todos os vetores para formar o estado final
     state = np.concatenate([
@@ -323,7 +336,8 @@ def sequence_to_state(sequence, model=None):
         group_ratio_features,
         last_region_one_hot,
         region_proportions,
-        np.array([region_streak_norm])
+        np.array([region_streak_norm]),
+        last_num_pulling_strength  # Adiciona a nova feature
     ]).astype(np.float32)
 
     return state
@@ -370,8 +384,8 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     dense = Dropout(0.3)(dense)
 
     out_num = Dense(num_total, activation='softmax', name='num_out')(dense)
-    out_color = Dense(3, activation='softmax', name='color_out')(dense) # zero/red/black
-    out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense) # zero,d1,d2,d3
+    out_color = Dense(3, activation='softmax', name='color_out')(dense)  # zero/red/black
+    out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)  # zero,d1,d2,d3
 
     model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen])
     optimizer = Nadam(learning_rate=4e-4)
@@ -511,68 +525,10 @@ def optimal_neighbors(number, max_neighbors=2):
         return []
     idx = WHEEL_ORDER.index(number)
     neigh = []
-    for i in range(1, max_neighbors + 1):
+    for i in range(1, max_neighbors+1):
         neigh.append(WHEEL_ORDER[(idx - i) % NUM_TOTAL])
         neigh.append(WHEEL_ORDER[(idx + i) % NUM_TOTAL])
     return list(dict.fromkeys(neigh))
-    
-# =========================================================================
-# NOVAS FUNÇÕES: TABELA DE NÚMEROS QUE SE PUXAM E VIZINHOS DINÂMICOS
-# =========================================================================
-def update_pull_table(history):
-    """
-    Atualiza a tabela de co-ocorrência a cada novo número.
-    """
-    if len(history) < 2:
-        return
-    
-    prev_num = str(history[-2])
-    current_num = str(history[-1])
-    
-    if prev_num in st.session_state.pull_table and current_num in st.session_state.pull_table[prev_num]:
-        st.session_state.pull_table[prev_num][current_num] += 1
-        
-def get_pull_weights(last_number, pull_table, alpha=0.5):
-    """
-    Calcula os pesos de 'pull' baseados na tabela de co-ocorrência.
-    """
-    if str(last_number) not in pull_table:
-        return np.ones(NUM_TOTAL)
-    
-    counts = pull_table[str(last_number)]
-    total_count = sum(counts.values())
-    
-    if total_count == 0:
-        return np.ones(NUM_TOTAL)
-        
-    weights = np.array([counts.get(str(i), 0) / total_count for i in range(NUM_TOTAL)])
-    
-    # Aplica um suavizador (smoothing) para evitar zero weights
-    weights = weights + alpha
-    
-    return weights / weights.sum()
-
-def get_smart_neighbor_suggestions(top_k_predictions, pull_table, n_neighbors=3):
-    """
-    Sugere vizinhos dinâmicos com base nos números que mais se 'puxam'.
-    """
-    suggestions = set(top_k_predictions)
-    
-    if len(st.session_state.history) > 0:
-        last_num = st.session_state.history[-1]
-        
-        # 1. Sugere os vizinhos físicos mais próximos do último número
-        suggestions.update(optimal_neighbors(last_num, max_neighbors=1))
-        
-        # 2. Sugere os vizinhos da tabela de pull dos top K
-        for num in top_k_predictions:
-            if str(num) in pull_table:
-                counts = pull_table[str(num)]
-                # Seleciona os N vizinhos com maior contagem
-                top_neighbors_pull = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:n_neighbors]
-                suggestions.update([int(n) for n, count in top_neighbors_pull])
-    
-    return sorted(list(suggestions))
 
 # =========================
 # RECOMPENSA FOCADA E SIMPLIFICADA
@@ -604,7 +560,7 @@ def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
     return reward * bet_amount
 
 # --- PREDICTION POSTPROCESSING ---
-def predict_next_numbers(model, history, pull_table, top_k=3):
+def predict_next_numbers(model, history, top_k=3):
     if history is None or len(history) < SEQUENCE_LEN or model is None:
         return []
     try:
@@ -632,23 +588,16 @@ def predict_next_numbers(model, history, pull_table, top_k=3):
     weighted = []
     freq_counter = Counter(history[-100:])
     last_num = history[-1] if len(history) > 0 else None
-    
-    # NOVOS PESOS DA TABELA DE PUXAR
-    pull_weights = get_pull_weights(last_num, pull_table, alpha=1.0)
-    
     for num in range(NUM_TOTAL):
         freq_factor = 1 + np.exp(freq_counter.get(num, 0) / 3 - 1)
         if last_num in WHEEL_ORDER:
-            dist = WHEEL_DISTANCE[WHEEL_ORDER.index(last_num)][WHEEL_ORDER.index(num)]
+            dist = WHEEL_DISTANCE[last_num][num]
             distance_factor = max(0.1, 2.5 - (dist / 12.0))
         else:
             distance_factor = 1.0
         momentum = sum(1 for i in range(1,4) if len(history)>=i and history[-i] == num)
         momentum_factor = 1 + momentum*0.25
-        
-        # Ponderação combinada com o novo fator de "pull"
-        weighted.append(adjusted[num] * freq_factor * distance_factor * momentum_factor * pull_weights[num])
-        
+        weighted.append(adjusted[num] * freq_factor * distance_factor * momentum_factor)
     weighted = np.array(weighted)
     if weighted.sum() == 0:
         return []
@@ -661,9 +610,9 @@ def predict_next_numbers(model, history, pull_table, top_k=3):
         'top_numbers': [(int(i), float(weighted[i])) for i in top_indices],
         'num_probs': num_probs,
         'color_probs': color_probs,
-        'dozen_pred': dozen_pred,
         'dozen_probs': dozen_probs,
-        'color_pred': color_pred
+        'color_pred': color_pred,
+        'dozen_pred': dozen_pred
     }
 
 # =========================
@@ -764,14 +713,12 @@ if st.button("Adicionar histórico"):
                 if x.strip().isdigit() and 0 <= int(x.strip()) <= 36
             ]
             
-            # Atualiza a pull_table para os novos números
-            if st.session_state.history:
-                prev_num = st.session_state.history[-1]
-                for num in new_nums:
-                    st.session_state.pull_table[str(prev_num)][str(num)] += 1
-                    prev_num = num
-            
-            st.session_state.history.extend(new_nums)
+            # Atualiza a matriz de co-ocorrência com o novo histórico
+            for i in range(len(new_nums)):
+                # Adiciona o novo número ao histórico principal temporariamente para a atualização
+                st.session_state.history.append(new_nums[i])
+                st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
+
             st.success(f"Adicionados {len(new_nums)} números ao histórico.")
             st.session_state.clear_input_bulk = True
             st.rerun()
@@ -791,12 +738,11 @@ with st.form("num_form", clear_on_submit=True):
 if st.session_state.last_input is not None:
     try:
         num = int(st.session_state.last_input)
-        
-        # ATUALIZA A TABELA DE PUXAR ANTES DE ADICIONAR O NOVO NÚMERO
-        if len(st.session_state.history) > 0:
-            update_pull_table(st.session_state.history + [num])
-            
         st.session_state.history.append(num)
+        
+        # --- ATUALIZAÇÃO DA MATRIZ DE CO-OCORRÊNCIA NO LOOP PRINCIPAL ---
+        st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
+        
         logger.info(f"Número novo inserido pelo usuário: {num}")
         st.session_state.last_input = None
 
@@ -840,48 +786,54 @@ if st.session_state.last_input is not None:
             with st.spinner("Treinando LSTM com mini-batches recentes..."):
                 train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
             st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model)
-            pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, st.session_state.pull_table, top_k=3)
+            pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
 
             if pred_info:
                 st.subheader("🎯 Previsões (LSTM + pós-processamento)")
                 for n, conf in pred_info['top_numbers']:
-                    st.write(f"Número: **{n}** — Prob: {conf:.2f}")
+                    st.write(f"Número: **{n}** — Prob: {conf:.2%}")
+                color_names = {0: "Zero", 1: "Vermelho", 2: "Preto"}
+                dozen_names = {0: "Zero", 1: "1ª dúzia (1-12)", 2: "2ª dúzia (13-24)", 3: "3ª dúzia (25-36)"}
+                st.write(f"Cor mais provável: **{color_names.get(pred_info['color_pred'],'-')}** — probs: {pred_info['color_probs']}")
+                st.write(f"Dúzia mais provável: **{dozen_names.get(pred_info['dozen_pred'],'-')}** — probs: {pred_info['dozen_probs']}")
+        else:
+            st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model)
 
-                st.markdown("---")
-                st.subheader("Sugestões de Vizinhos Dinâmicos")
-                top_k_numbers = [n for n, conf in pred_info['top_numbers']]
-                suggestions = get_smart_neighbor_suggestions(top_k_numbers, st.session_state.pull_table, n_neighbors=2)
-                if suggestions:
-                    st.write(f"Sugeridos: **{', '.join(map(str, suggestions))}**")
-
-                st.markdown("---")
-                st.subheader("Estatísticas de Desempenho (DQN)")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric(label="Total de Apostas", value=st.session_state.stats['bets'])
-                with col2:
-                    st.metric(label="Vitórias", value=st.session_state.stats['wins'])
-                with col3:
-                    st.metric(label="Lucro/Prejuízo", value=f"R$ {st.session_state.stats['profit']:.2f}")
-
-                # ================================================
-                # LINHAS REMOVIDAS PARA OCULTAR A TABELA DE CO-OCORRÊNCIA
-                # O código abaixo foi comentado para não exibir a tabela
-                # ================================================
-                # st.markdown("---")
-                # st.subheader("Tabela de Co-ocorrência ('Números que se Puxam')")
-                # pull_df = pd.DataFrame(st.session_state.pull_table).fillna(0).astype(int)
-                # st.dataframe(pull_df)
-                
-                # ================================================
-
-                st.markdown("---")
-                st.subheader("Histórico Recente")
-                st.write(st.session_state.history[-20:])
-        
     except Exception as e:
-        st.error(f"Erro ao processar o número: {e}")
-        logger.error(f"Erro fatal: {e}")
-        st.session_state.last_input = None
-        st.rerun()
+        logger.exception("Erro inesperado ao processar entrada")
+        st.error(f"Erro inesperado: {e}")
 
+state = sequence_to_state(st.session_state.history, st.session_state.model)
+agent = st.session_state.dqn_agent
+
+if state is not None and agent is None:
+    st.session_state.dqn_agent = DQNAgent(state_size=state.shape[0], action_size=NUM_TOTAL)
+    agent = st.session_state.dqn_agent
+    logger.info("Agente DQN criado (depois de estado)")
+
+if agent is not None and state is not None:
+    top_actions = agent.act_top_k(state, k=3, use_epsilon=True)
+else:
+    top_actions = random.sample(range(NUM_TOTAL), 3)
+
+st.subheader("🤖 Ações sugeridas pela IA (DQN) com vizinhos")
+for action in top_actions:
+    neighbors = optimal_neighbors(action, max_neighbors=2)
+    st.write(f"Aposte no número: **{action}** | Vizinhos (2 cada lado): {neighbors}")
+
+st.session_state.prev_state = state
+st.session_state.prev_action = top_actions[0] if top_actions else None
+st.session_state.prev_actions = top_actions[:] if top_actions else None
+
+st.markdown("---")
+st.subheader("📊 Estatísticas da sessão")
+st.write(f"Total de apostas: {st.session_state.stats['bets']}")
+st.write(f"Vitórias: {st.session_state.stats['wins']}")
+st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
+st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
+st.write(f"Números no histórico: {len(st.session_state.history)}")
+
+st.markdown("---")
+st.subheader("🔍 Matriz de Força de Atração (Co-ocorrência)")
+st.write("Esta matriz mostra quantas vezes um número (linha) foi seguido por outro (coluna).")
+st.dataframe(st.session_state.co_occurrence_matrix)
