@@ -20,7 +20,7 @@ import json
 # Utils Streamlit
 # =========================
 def rerun():
-    # Mantido por compatibilidade (não usado diretamente)
+# Mantido por compatibilidade (não usado diretamente)
     raise st.script_runner.RerunException(st.script_request_queue.RerunData())
 
 logging.basicConfig(filename='roleta.log', filemode='a',
@@ -884,4 +884,5 @@ if st.session_state.last_input is not None:
         logger.error(f"Erro fatal: {e}")
         st.session_state.last_input = None
         st.rerun()
+
 
