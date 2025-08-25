@@ -9,6 +9,7 @@ from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Dropout, At
 from tensorflow.keras.optimizers import Nadam, Adam
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.layers import LeakyReLU
 
 from collections import Counter, deque
 import random
@@ -18,7 +19,6 @@ import logging
 # Utils Streamlit
 # =========================
 def rerun():
-    # Mantido por compatibilidade (não usado diretamente)
     raise st.script_runner.RerunException(st.script_request_queue.RerunData())
 
 logging.basicConfig(filename='roleta.log', filemode='a',
@@ -49,9 +49,17 @@ if 'input_bulk' not in st.session_state:
     st.session_state.input_bulk = ""
 if 'clear_input_bulk' not in st.session_state:
     st.session_state.clear_input_bulk = False
-# Nova feature: Matriz de co-ocorrência
 if 'co_occurrence_matrix' not in st.session_state:
     st.session_state.co_occurrence_matrix = np.zeros((37, 37))
+    
+# MUDANÇA: Adicionado estado para armazenar estatísticas de normalização
+if 'feat_stats' not in st.session_state:
+    # Exemplo de valores. VOCÊ DEVE SUBSTITUIR ISSO POR ESTATÍSTICAS REAIS
+    # CALCULADAS EM UM GRANDE HISTÓRICO.
+    st.session_state.feat_stats = {
+        'means': np.array([0.5, 0.25, 0.5, 0.2, 0.5, 0.5, 0.5, 0.1]),
+        'stds': np.array([0.2, 0.1, 0.2, 0.1, 0.1, 0.1, 0.1, 0.05])
+    }
 
 # --- CONSTANTS ---
 NUM_TOTAL = 37
@@ -84,17 +92,18 @@ LSTM_BATCH_SIZE = 32
 EPSILON_START = 1.0
 EPSILON_MIN = 0.05
 EPSILON_DECAY = 0.992
+# MUDANÇA: Adicionado limiar de confiança para aposta
+CONFIDENCE_THRESHOLD = 0.1
 
 # wheel order (posição física na roda)
 WHEEL_ORDER = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,
-               5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26]
+                5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26]
 WHEEL_DISTANCE = [[min(abs(i-j), 37-abs(i-j)) for j in range(37)] for i in range(37)]
 
 # red numbers for European wheel (standard)
 RED_NUMBERS = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
 
 # Definindo as principais regiões da roleta
-# Baseado na ordem física da roda europeia
 REGIONS = {
     "zero_spiel": {0, 32, 15, 19, 4, 21, 2, 25}, # 8 números
     "voisins_du_zero": {0, 2, 3, 4, 7, 12, 15, 18, 19, 21, 22, 25, 26, 28, 29, 32, 35, 36}, # 17 números (Vizinhos)
@@ -132,13 +141,20 @@ def number_to_region(n):
         if n in REGIONS[region_name]:
             return i
     return -1
-
-def get_advanced_features(sequence):
+    
+# MUDANÇA: A função agora pode normalizar usando estatísticas fornecidas
+def get_advanced_features(sequence, feat_means=None, feat_stds=None):
     if sequence is None or len(sequence) < 2:
-        return [0.0]*8
+        # Se os dados estiverem faltando, retorna features normalizadas para zero
+        return np.zeros(8)
+    
     seq = np.array(sequence)
-    mean = np.mean(seq)
-    std = np.std(seq)
+    
+    # 1. Média e Desvio Padrão
+    mean = np.mean(seq) / 36.0
+    std = np.std(seq) / 18.0
+    
+    # 2. Velocidade e desaceleração da roda
     last = int(sequence[-1])
     second_last = int(sequence[-2])
     if last in WHEEL_ORDER and second_last in WHEEL_ORDER:
@@ -154,35 +170,41 @@ def get_advanced_features(sequence):
     else:
         wheel_speed = 0.0
         deceleration = 0.0
+        
+    wheel_speed /= 36.0
+    deceleration /= 36.0
+
+    # 3. Frequências e repetições
     freq = Counter(sequence)
-    hot_number = max(freq.values()) if freq else 1
-    cold_number = min(freq.values()) if freq else 0
-    return [
-        mean / 36.0,
-        std / 18.0,
-        wheel_speed / 36.0,
-        deceleration / 36.0,
-        freq.get(last, 0) / hot_number if hot_number > 0 else 0.0,
-        (hot_number - cold_number) / len(sequence) if len(sequence) > 0 else 0.0,
-        len(freq) / len(sequence) if len(sequence) > 0 else 0.0,
-        1.0 if last == second_last else 0.0
-    ]
+    hot_number_count = max(freq.values()) if freq else 1
+    cold_number_count = min(freq.values()) if freq else 0
+    
+    last_freq_norm = freq.get(last, 0) / hot_number_count if hot_number_count > 0 else 0.0
+    freq_range_norm = (hot_number_count - cold_number_count) / len(sequence) if len(sequence) > 0 else 0.0
+    unique_ratio = len(freq) / len(sequence) if len(sequence) > 0 else 0.0
+    is_repeat = 1.0 if last == second_last else 0.0
+
+    features = np.array([
+        mean, std, wheel_speed, deceleration,
+        last_freq_norm, freq_range_norm, unique_ratio, is_repeat
+    ])
+
+    # MUDANÇA: Normalização usando as estatísticas fornecidas
+    if feat_means is not None and feat_stds is not None:
+        features = (features - feat_means) / (feat_stds + 1e-6) # Adiciona epsilon para evitar divisão por zero
+    
+    return features
 
 # Nova função para atualizar a matriz de co-ocorrência
 def update_co_occurrence_matrix(matrix, history):
     if len(history) >= 2:
         prev_num = history[-2]
         curr_num = history[-1]
-        # Garante que os números estão dentro do range
         if 0 <= prev_num < NUM_TOTAL and 0 <= curr_num < NUM_TOTAL:
             matrix[prev_num][curr_num] += 1
     return matrix
 
 def sequence_to_one_hot(sequence):
-    """
-    Retorna array (SEQUENCE_LEN, NUM_TOTAL) com one-hot da posição na roda.
-    Padding (quando falta histórico) -> vetor zeros.
-    """
     seq = list(sequence[-SEQUENCE_LEN:]) if sequence else []
     pad = [-1] * max(0, (SEQUENCE_LEN - len(seq)))
     seq_padded = pad + seq
@@ -195,17 +217,13 @@ def sequence_to_one_hot(sequence):
             one_hot_seq.append(np.zeros(NUM_TOTAL))
     return np.array(one_hot_seq)
 
-def sequence_to_state(sequence, model=None):
-    """
-    Retorna estado 1D para o DQN: [one_hot_seq.flatten(), features, num_probs, color_probs, dozen_probs, age_vector, new_features]
-    """
+def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
     seq_slice = sequence[-SEQUENCE_LEN:] if sequence else []
-
-    # 1. Base State Features (mantidas)
-    one_hot_seq = sequence_to_one_hot(seq_slice)
-    features = get_advanced_features(seq_slice)
     
-    # 2. LSTM Prediction Probabilities (mantidas)
+    # MUDANÇA: Passando as estatísticas para a função de features
+    features = get_advanced_features(seq_slice, feat_means, feat_stds)
+    one_hot_seq = sequence_to_one_hot(seq_slice)
+
     num_probs = np.zeros(NUM_TOTAL)
     color_probs = np.zeros(3)
     dozen_probs = np.zeros(4)
@@ -225,7 +243,6 @@ def sequence_to_state(sequence, model=None):
         except Exception:
             pass
 
-    # 3. Vetor de Idade (mantido e normalizado)
     age_vector = [0] * NUM_TOTAL
     last_seen = {num: i for i, num in enumerate(sequence)}
     for num in range(NUM_TOTAL):
@@ -234,18 +251,11 @@ def sequence_to_state(sequence, model=None):
         else:
             age_vector[num] = len(sequence)
     max_age = max(age_vector) if age_vector else 1
-    age_vector = [age / max(1, max_age) for age in age_vector]
-    age_vector = np.array(age_vector)
+    age_vector = np.array([age / max(1, max_age) for age in age_vector])
 
-    # ==================================
-    # === NOVAS FEATURES ADICIONADAS ===
-    # ==================================
-    
-    # Nova Feature 1: Run Length Encoding (Streaks e Alternâncias)
-    # Apenas para o último número, cor e dúzia
     last_run_len_num = 0
     if len(sequence) >= 2:
-        for i in range(1, len(sequence)):
+        for i in range(1, len(sequence) + 1):
             if sequence[-i] == sequence[-1]:
                 last_run_len_num = i
             else:
@@ -253,7 +263,7 @@ def sequence_to_state(sequence, model=None):
     last_run_len_color = 0
     if len(sequence) >= 2:
         last_color = number_to_color(sequence[-1])
-        for i in range(1, len(sequence)):
+        for i in range(1, len(sequence) + 1):
             if number_to_color(sequence[-i]) == last_color:
                 last_run_len_color = i
             else:
@@ -261,19 +271,17 @@ def sequence_to_state(sequence, model=None):
     last_run_len_dozen = 0
     if len(sequence) >= 2:
         last_dozen = number_to_dozen(sequence[-1])
-        for i in range(1, len(sequence)):
+        for i in range(1, len(sequence) + 1):
             if number_to_dozen(sequence[-i]) == last_dozen:
                 last_run_len_dozen = i
             else:
                 break
     run_length_features = np.array([last_run_len_num / SEQUENCE_LEN, last_run_len_color / SEQUENCE_LEN, last_run_len_dozen / SEQUENCE_LEN])
     
-    # Nova Feature 2: Grupos do Último Número (One-hot para Cor e Dúzia)
     last_num = sequence[-1] if sequence else -1
     last_color_one_hot = to_categorical(number_to_color(last_num), 3) if last_num in range(NUM_TOTAL) else np.zeros(3)
     last_dozen_one_hot = to_categorical(number_to_dozen(last_num), 4) if last_num in range(NUM_TOTAL) else np.zeros(4)
     
-    # Nova Feature 3: Proporções de Par/Ímpar e Alto/Baixo
     recent_seq = seq_slice
     even_count = sum(1 for n in recent_seq if n % 2 == 0 and n != 0)
     odd_count = sum(1 for n in recent_seq if n % 2 != 0)
@@ -286,13 +294,11 @@ def sequence_to_state(sequence, model=None):
     
     group_ratio_features = np.array([even_odd_ratio, high_low_ratio])
     
-    # NOVAS FEATURES DE REGIÕES DA RODA
     num_regions = len(REGIONS)
     last_region_one_hot = np.zeros(num_regions)
     region_proportions = np.zeros(num_regions)
     region_streak = 0
     
-    # Calcula proporções de regiões e streak
     if len(recent_seq) > 0:
         region_counts = Counter(number_to_region(n) for n in recent_seq)
         for i in range(num_regions):
@@ -309,20 +315,15 @@ def sequence_to_state(sequence, model=None):
     
     region_streak_norm = region_streak / SEQUENCE_LEN
 
-    # === NOVA FEATURE: FORÇA DE ATRAÇÃO (PULLING STRENGTH) ===
-    # A matriz de co-ocorrência é atualizada no loop principal
     last_num_pulling_strength = np.zeros(NUM_TOTAL)
     if len(sequence) > 0:
         last_num = sequence[-1]
         if 0 <= last_num < NUM_TOTAL:
-            # Obtém a linha da matriz correspondente ao último número
             last_num_pulling_strength = st.session_state.co_occurrence_matrix[last_num, :].copy()
-            # Normaliza a força de atração para evitar valores muito altos
             total_co_occurrences = np.sum(last_num_pulling_strength)
             if total_co_occurrences > 0:
                 last_num_pulling_strength /= total_co_occurrences
     
-    # Combine todos os vetores para formar o estado final
     state = np.concatenate([
         one_hot_seq.flatten(),
         np.array(features),
@@ -337,7 +338,7 @@ def sequence_to_state(sequence, model=None):
         last_region_one_hot,
         region_proportions,
         np.array([region_streak_norm]),
-        last_num_pulling_strength  # Adiciona a nova feature
+        last_num_pulling_strength
     ]).astype(np.float32)
 
     return state
@@ -346,15 +347,8 @@ def sequence_to_state(sequence, model=None):
 # MODELO LSTM – ARQUITETURA REFINADA
 # =========================
 def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
-    """
-    LSTM multi-output com maior profundidade + atenção:
-      - saída 1: probabilidade para cada número (37)
-      - saída 2: probabilidade para cor (3) -> zero/red/black
-      - saída 3: probabilidade para dúzia (4) -> zero/d1/d2/d3
-    """
     seq_input = Input(shape=(seq_len, num_total), name='sequence_input')
 
-    # Pilha LSTM mais profunda
     x = LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4))(seq_input)
     x = BatchNormalization()(x)
     x = Dropout(0.3)(x)
@@ -363,38 +357,34 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     x = BatchNormalization()(x)
     x = Dropout(0.25)(x)
 
-    # Self-Attention simples
     x_att = Attention(name="self_attention")([x, x])
 
-    # Mais uma LSTM para sintetizar após atenção
     x = LSTM(64, return_sequences=False)(x_att)
     x = BatchNormalization()(x)
     x = Dropout(0.25)(x)
 
-    # Features adicionais
     feat_input = Input(shape=(8,), name='features_input')
     dense_feat = Dense(48, activation='swish')(feat_input)
     dense_feat = BatchNormalization()(dense_feat)
     dense_feat = Dropout(0.2)(dense_feat)
 
-    # Combina LSTM + features
     combined = Concatenate()([x, dense_feat])
     dense = Dense(160, activation='swish')(combined)
     dense = BatchNormalization()(dense)
     dense = Dropout(0.3)(dense)
 
     out_num = Dense(num_total, activation='softmax', name='num_out')(dense)
-    out_color = Dense(3, activation='softmax', name='color_out')(dense)  # zero/red/black
-    out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)  # zero,d1,d2,d3
+    out_color = Dense(3, activation='softmax', name='color_out')(dense)
+    out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)
 
     model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen])
     optimizer = Nadam(learning_rate=4e-4)
     model.compile(optimizer=optimizer,
-                  loss={'num_out': 'categorical_crossentropy',
-                        'color_out': 'categorical_crossentropy',
-                        'dozen_out': 'categorical_crossentropy'},
-                  loss_weights={'num_out': 1.0, 'color_out': 0.35, 'dozen_out': 0.35},
-                  metrics={'num_out': 'accuracy'})
+                    loss={'num_out': 'categorical_crossentropy',
+                          'color_out': 'categorical_crossentropy',
+                          'dozen_out': 'categorical_crossentropy'},
+                    loss_weights={'num_out': 1.0, 'color_out': 0.35, 'dozen_out': 0.35},
+                    metrics={'num_out': 'accuracy'})
     return model
 
 # =========================
@@ -415,12 +405,15 @@ class DQNAgent:
         self.update_target()
         self.train_step = 0
 
+    # MUDANÇA: Arquitetura mais enxuta e LeakyReLU
     def _build_model(self):
         model = tf.keras.Sequential([
-            Dense(320, activation='relu', input_shape=(self.state_size,)),
+            Dense(256, input_shape=(self.state_size,)),
+            LeakyReLU(alpha=0.1),
             BatchNormalization(),
             Dropout(0.3),
-            Dense(160, activation='relu'),
+            Dense(128),
+            LeakyReLU(alpha=0.1),
             Dense(self.action_size, activation='linear')
         ])
         model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss='mse')
@@ -437,16 +430,33 @@ class DQNAgent:
             return
         self.memory.append((state, action, reward, next_state, done))
 
+    # MUDANÇA: Adicionado limiar de confiança
     def act_top_k(self, state, k=3, use_epsilon=True):
         if state is None or len(state) == 0:
             return random.sample(range(self.action_size), k)
-        # Exploração
+        
         if use_epsilon and np.random.rand() <= self.epsilon:
             return random.sample(range(self.action_size), k)
+        
         try:
             q_values = self.model.predict(np.array([state]), verbose=0)[0]
-            top_k_actions = np.argsort(q_values)[-k:][::-1]
-            return top_k_actions.tolist()
+            
+            top_k_actions = []
+            sorted_indices = np.argsort(q_values)[::-1]
+            
+            # Filtra por limiar de confiança
+            for idx in sorted_indices:
+                if q_values[idx] > CONFIDENCE_THRESHOLD:
+                    top_k_actions.append(int(idx))
+                if len(top_k_actions) >= k:
+                    break
+            
+            # Se não houver números acima do limiar, retorna os mais prováveis
+            if not top_k_actions:
+                return list(sorted_indices[:k])
+            
+            return top_k_actions
+            
         except Exception:
             return random.sample(range(self.action_size), k)
 
@@ -467,7 +477,6 @@ class DQNAgent:
         
         batch = random.sample(self.memory, batch_size)
         
-        # Preparar dados para o modelo (o estado é o mesmo para todas as ações)
         states = np.array([b[0] for b in batch])
         next_states = np.array([b[3] for b in batch])
         
@@ -475,25 +484,19 @@ class DQNAgent:
             return
         
         try:
-            # Previsões para o próximo estado (Q-learning)
             q_next = self.target_model.predict(next_states, verbose=0)
-            # Previsões para o estado atual
             q_curr = self.model.predict(states, verbose=0)
         except Exception:
             return
 
-        # Construir os lotes de treinamento
         X, Y = [], []
         for i, (state, actions, reward, next_state, done) in enumerate(batch):
             target = q_curr[i].copy()
             
-            # O loop principal para ajustar o Q-value de cada ação do lote
             for action in actions:
                 if done:
-                    # Se o jogo terminou, a recompensa é o valor final
                     target[action] = reward
                 else:
-                    # Caso contrário, aplica a equação de Bellman
                     next_q = q_next[i] if i < len(q_next) else np.zeros(self.action_size)
                     target[action] = reward + self.gamma * np.max(next_q)
             
@@ -518,9 +521,6 @@ class DQNAgent:
 
 # --- Neighbors ---
 def optimal_neighbors(number, max_neighbors=2):
-    """
-    Retorna lista de vizinhos (à esquerda e direita alternados) da roda.
-    """
     if number not in WHEEL_ORDER:
         return []
     idx = WHEEL_ORDER.index(number)
@@ -533,29 +533,29 @@ def optimal_neighbors(number, max_neighbors=2):
 # =========================
 # RECOMPENSA FOCADA E SIMPLIFICADA
 # =========================
+# MUDANÇA: Recompensa com penalidade por número de ações
 def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
                    max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD):
-    """
-    Recompensa focada: apenas premia acerto de número ou vizinho.
-    Perda em todos os outros casos.
-    """
     reward = 0.0
     action_numbers = set([a for a in action_numbers if 0 <= a <= 36])
+    
+    # Adiciona uma pequena penalidade por cada aposta
+    bet_penalty = 0.1 * len(action_numbers)
 
-    # 1. Acerto Exato (maior recompensa e prioridade)
+    # 1. Acerto Exato
     if outcome_number in action_numbers:
-        reward = REWARD_EXACT
-    # 2. Acerto Vizinho (recompensa menor)
+        reward = REWARD_EXACT - bet_penalty
+    # 2. Acerto Vizinho
     else:
         all_neighbors = set()
         for a in action_numbers:
             all_neighbors.update(optimal_neighbors(a, max_neighbors=max_neighbors_for_reward))
         
         if outcome_number in all_neighbors:
-            reward = REWARD_NEIGHBOR
-        # 3. Perda total (penalidade)
+            reward = REWARD_NEIGHBOR - bet_penalty
+        # 3. Perda total
         else:
-            reward = REWARD_LOSS
+            reward = REWARD_LOSS - bet_penalty
 
     return reward * bet_amount
 
@@ -564,10 +564,13 @@ def predict_next_numbers(model, history, top_k=3):
     if history is None or len(history) < SEQUENCE_LEN or model is None:
         return []
     try:
+        # MUDANÇA: Passando as estatísticas para a função de features
+        feat = np.array([get_advanced_features(history[-SEQUENCE_LEN:],
+                                             st.session_state.feat_stats['means'],
+                                             st.session_state.feat_stats['stds'])])
         seq_one_hot = sequence_to_one_hot(history).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
-        feat = np.array([get_advanced_features(history[-SEQUENCE_LEN:])])
         raw = model.predict([seq_one_hot, feat], verbose=0)
-        # raw -> [num_probs, color_probs, dozen_probs]
+        
         if isinstance(raw, list) and len(raw) == 3:
             num_probs = raw[0][0]
             color_probs = raw[1][0]
@@ -576,10 +579,10 @@ def predict_next_numbers(model, history, top_k=3):
             num_probs = np.array(raw)[0]
             color_probs = np.array([0.0, 0.0, 0.0])
             dozen_probs = np.array([0.0, 0.0, 0.0, 0.0])
-    except Exception:
+    except Exception as e:
+        logger.error(f"Erro na previsão LSTM: {e}")
         return []
 
-    # temperature + heurísticas
     temperature = 0.8
     adjusted = np.log(num_probs + 1e-12) / temperature
     adjusted = np.exp(adjusted)
@@ -598,6 +601,7 @@ def predict_next_numbers(model, history, top_k=3):
         momentum = sum(1 for i in range(1,4) if len(history)>=i and history[-i] == num)
         momentum_factor = 1 + momentum*0.25
         weighted.append(adjusted[num] * freq_factor * distance_factor * momentum_factor)
+    
     weighted = np.array(weighted)
     if weighted.sum() == 0:
         return []
@@ -619,10 +623,6 @@ def predict_next_numbers(model, history, top_k=3):
 # LSTM: construção de dataset e treino recente
 # =========================
 def build_lstm_supervised_from_history(history):
-    """
-    Constrói X_seq, X_feat, y_num, y_color, y_dozen a partir do histórico.
-    Retorna arrays numpy prontos para treino.
-    """
     X_seq, X_feat, y_num, y_color, y_dozen = [], [], [], [], []
     if len(history) <= SEQUENCE_LEN:
         return None
@@ -633,7 +633,10 @@ def build_lstm_supervised_from_history(history):
         target = history[i+SEQUENCE_LEN]
 
         X_seq.append(sequence_to_one_hot(seq_slice))
-        X_feat.append(get_advanced_features(seq_slice))
+        # MUDANÇA: Passando as estatísticas para a função de features
+        X_feat.append(get_advanced_features(seq_slice,
+                                           st.session_state.feat_stats['means'],
+                                           st.session_state.feat_stats['stds']))
 
         if target in WHEEL_ORDER:
             pos = WHEEL_ORDER.index(target)
@@ -658,10 +661,6 @@ def build_lstm_supervised_from_history(history):
     return X_seq, X_feat, y_num, y_color, y_dozen
 
 def train_lstm_on_recent_minibatch(model, history):
-    """
-    Treina o LSTM usando amostras aleatórias de janelas recentes,
-    evitando reprocessar todo histórico em cada passo.
-    """
     data = build_lstm_supervised_from_history(history)
     if data is None:
         return
@@ -670,7 +669,6 @@ def train_lstm_on_recent_minibatch(model, history):
     if n == 0:
         return
 
-    # Amostragem aleatória sem reposição
     k = min(n, LSTM_BATCH_SAMPLES)
     idx = np.random.choice(n, k, replace=False)
     try:
@@ -685,25 +683,21 @@ def train_lstm_on_recent_minibatch(model, history):
 
 # --- UI ---
 st.set_page_config(layout="centered")
-st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (REVISADO + REWARD / TREINO RECENTE)")
+st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (REVISADO)")
 
 st.markdown("### Inserir histórico manualmente (ex: 0,32,15,19,4,21)")
 
-# 1) Garantir chaves no session_state
 if 'input_bulk' not in st.session_state:
     st.session_state.input_bulk = ""
 if 'clear_input_bulk' not in st.session_state:
     st.session_state.clear_input_bulk = False
 
-# 2) APLICAR LIMPEZA ANTES DE CRIAR O WIDGET
 if st.session_state.clear_input_bulk:
     st.session_state.input_bulk = ""
     st.session_state.clear_input_bulk = False
 
-# 3) Criar o text_area
 input_bulk = st.text_area("Cole números separados por vírgula", key="input_bulk")
 
-# 4) Botão para adicionar histórico
 if st.button("Adicionar histórico"):
     if st.session_state.input_bulk and st.session_state.input_bulk.strip():
         try:
@@ -713,9 +707,7 @@ if st.button("Adicionar histórico"):
                 if x.strip().isdigit() and 0 <= int(x.strip()) <= 36
             ]
             
-            # Atualiza a matriz de co-ocorrência com o novo histórico
             for i in range(len(new_nums)):
-                # Adiciona o novo número ao histórico principal temporariamente para a atualização
                 st.session_state.history.append(new_nums[i])
                 st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
 
@@ -740,7 +732,6 @@ if st.session_state.last_input is not None:
         num = int(st.session_state.last_input)
         st.session_state.history.append(num)
         
-        # --- ATUALIZAÇÃO DA MATRIZ DE CO-OCORRÊNCIA NO LOOP PRINCIPAL ---
         st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
         
         logger.info(f"Número novo inserido pelo usuário: {num}")
@@ -755,7 +746,10 @@ if st.session_state.last_input is not None:
             agent = st.session_state.dqn_agent
             reward = compute_reward(st.session_state.prev_actions, num, bet_amount=BET_AMOUNT,
                                     max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD)
-            next_state = sequence_to_state(st.session_state.history, st.session_state.model)
+            # MUDANÇA: Passando as estatísticas para o state
+            next_state = sequence_to_state(st.session_state.history, st.session_state.model,
+                                            st.session_state.feat_stats['means'],
+                                            st.session_state.feat_stats['stds'])
 
             if agent is not None:
                 agent.remember(st.session_state.prev_state, st.session_state.prev_actions, reward, next_state, False)
@@ -785,7 +779,11 @@ if st.session_state.last_input is not None:
         if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN*2:
             with st.spinner("Treinando LSTM com mini-batches recentes..."):
                 train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
-            st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model)
+            
+            # MUDANÇA: Passando as estatísticas para o state
+            st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model,
+                                                             st.session_state.feat_stats['means'],
+                                                             st.session_state.feat_stats['stds'])
             pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
 
             if pred_info:
@@ -797,13 +795,19 @@ if st.session_state.last_input is not None:
                 st.write(f"Cor mais provável: **{color_names.get(pred_info['color_pred'],'-')}** — probs: {pred_info['color_probs']}")
                 st.write(f"Dúzia mais provável: **{dozen_names.get(pred_info['dozen_pred'],'-')}** — probs: {pred_info['dozen_probs']}")
         else:
-            st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model)
+            # MUDANÇA: Passando as estatísticas para o state
+            st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model,
+                                                             st.session_state.feat_stats['means'],
+                                                             st.session_state.feat_stats['stds'])
 
     except Exception as e:
         logger.exception("Erro inesperado ao processar entrada")
         st.error(f"Erro inesperado: {e}")
 
-state = sequence_to_state(st.session_state.history, st.session_state.model)
+# MUDANÇA: Passando as estatísticas para o state
+state = sequence_to_state(st.session_state.history, st.session_state.model,
+                           st.session_state.feat_stats['means'],
+                           st.session_state.feat_stats['stds'])
 agent = st.session_state.dqn_agent
 
 if state is not None and agent is None:
@@ -815,25 +819,26 @@ if agent is not None and state is not None:
     top_actions = agent.act_top_k(state, k=3, use_epsilon=True)
 else:
     top_actions = random.sample(range(NUM_TOTAL), 3)
+    
+# MUDANÇA: Salvando as ações sugeridas
+st.session_state.prev_actions = top_actions
 
 st.subheader("🤖 Ações sugeridas pela IA (DQN) com vizinhos")
-for action in top_actions:
-    neighbors = optimal_neighbors(action, max_neighbors=2)
-    st.write(f"Aposte no número: **{action}** | Vizinhos (2 cada lado): {neighbors}")
-
-st.session_state.prev_state = state
-st.session_state.prev_action = top_actions[0] if top_actions else None
-st.session_state.prev_actions = top_actions[:] if top_actions else None
+for action_num in top_actions:
+    neighbors = optimal_neighbors(action_num, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
+    st.write(f"- Aposta: **{action_num}** (Vizinhos: {', '.join(map(str, neighbors))})")
 
 st.markdown("---")
-st.subheader("📊 Estatísticas da sessão")
-st.write(f"Total de apostas: {st.session_state.stats['bets']}")
-st.write(f"Vitórias: {st.session_state.stats['wins']}")
-st.write(f"Lucro acumulado: R$ {st.session_state.stats['profit']:.2f}")
-st.write(f"Sequência máxima de vitórias: {st.session_state.stats['max_streak']}")
-st.write(f"Números no histórico: {len(st.session_state.history)}")
+st.subheader("📊 Estatísticas do Agente")
+stats = st.session_state.stats
+if stats['bets'] > 0:
+    win_rate = (stats['wins'] / stats['bets']) * 100
+    st.write(f"**Apostas:** {stats['bets']} | **Vitórias:** {stats['wins']} | **Taxa de Vitoria:** {win_rate:.2f}%")
+    st.write(f"**Seq. de Vitórias:** {stats['streak']} | **Máx. Seq. de Vitórias:** {stats['max_streak']}")
+    profit_color = "green" if stats['profit'] >= 0 else "red"
+    st.markdown(f"**Lucro total:** <span style='color:{profit_color}'>${stats['profit']:.2f}</span>", unsafe_allow_html=True)
+else:
+    st.write("Ainda não há estatísticas de apostas.")
 
-st.markdown("---")
-st.subheader("🔍 Matriz de Força de Atração (Co-ocorrência)")
-st.write("Esta matriz mostra quantas vezes um número (linha) foi seguido por outro (coluna).")
-st.dataframe(st.session_state.co_occurrence_matrix)
+st.subheader("🎲 Histórico")
+st.write(", ".join(map(str, st.session_state.history[::-1])))
