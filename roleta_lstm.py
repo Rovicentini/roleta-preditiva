@@ -72,7 +72,7 @@ REPLAY_BATCH = 100
 REPLAY_SIZE = 5000
 DQN_TRAIN_EVERY = 5
 DQN_LEARNING_RATE = 1e-3
-DQN_GAMMA = 0.95
+DQN_GAMMA = 0.80
 
 # Recompensa (shaping)
 REWARD_EXACT = 35.0
@@ -583,7 +583,7 @@ def predict_next_numbers(model, history, top_k=3):
         logger.error(f"Erro na previsão LSTM: {e}")
         return []
 
-    temperature = 0.8
+    temperature = 0.4
     adjusted = np.log(num_probs + 1e-12) / temperature
     adjusted = np.exp(adjusted)
     adjusted /= adjusted.sum()
@@ -842,3 +842,4 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
