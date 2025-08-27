@@ -72,7 +72,7 @@ REPLAY_BATCH = 100
 REPLAY_SIZE = 5000
 DQN_TRAIN_EVERY = 5
 DQN_LEARNING_RATE = 1e-3
-DQN_GAMMA = 0.50
+DQN_GAMMA = 0.40
 
 # Recompensa (shaping)
 REWARD_EXACT = 35.0
@@ -842,5 +842,6 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
