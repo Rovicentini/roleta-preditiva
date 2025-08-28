@@ -676,7 +676,7 @@ def predict_next_numbers(model, history, top_k=3):
         
         # --------------------------------------------------------------------------------
         # MUDANÇA: O modelo agora retorna uma lista com 4 elementos
-       if isinstance(raw, list) and len(raw) == 6:
+if isinstance(raw, list) and len(raw) == 6:
     num_probs = raw[0][0]
     color_probs = raw[1][0]
     dozen_probs = raw[2][0]
@@ -1026,6 +1026,7 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
