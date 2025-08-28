@@ -10,7 +10,7 @@ from tensorflow.keras.optimizers import Nadam, Adam
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.layers import LeakyReLU
-
+from tensorflow.keras.layers import Bidirectional
 from collections import Counter, deque
 import random
 import logging
@@ -352,14 +352,20 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
 def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     seq_input = Input(shape=(seq_len, num_total), name='sequence_input')
 
-    x = LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4))(seq_input)
+    # --- INÍCIO DA MUDANÇA: Substituindo as camadas LSTM ---
+    
+    # 1. Primeira camada LSTM agora é Bidirecional
+    x = Bidirectional(LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4)))(seq_input)
     x = BatchNormalization()(x)
     x = Dropout(0.3)(x)
 
-    x = LSTM(96, return_sequences=True, kernel_regularizer=l2(1e-4))(x)
+    # 2. Segunda camada LSTM também é Bidirecional
+    x = Bidirectional(LSTM(96, return_sequences=True, kernel_regularizer=l2(1e-4)))(x)
     x = BatchNormalization()(x)
-    x = Dropout(0.25)(x)
+    x = Dropout(0.5)(x)
 
+    # --- FIM DA MUDANÇA ---
+    
     x_att = Attention(name="self_attention")([x, x])
 
     x = LSTM(64, return_sequences=False)(x_att)
@@ -381,23 +387,21 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)
     out_neighbors = Dense(num_total, activation='softmax', name='neighbors_out')(dense)
 
-    # NOVO CÓDIGO AQUI
     out_regions = Dense(len(REGIONS), activation='softmax', name='regions_out')(dense)
     out_even_odd_high_low = Dense(4, activation='softmax', name='eohl_out')(dense)
 
-    # AQUI: O modelo agora tem 6 saídas
     model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen, out_neighbors, out_regions, out_even_odd_high_low])
     
     optimizer = Nadam(learning_rate=4e-4)
     model.compile(optimizer=optimizer,
-                    loss={'num_out': 'categorical_crossentropy',
-                          'color_out': 'categorical_crossentropy',
-                          'dozen_out': 'categorical_crossentropy',
-                          'neighbors_out': 'categorical_crossentropy',
-                          'regions_out': 'categorical_crossentropy', # <- Nova perda
-                          'eohl_out': 'categorical_crossentropy'}, # <- Nova perda
-                    loss_weights={'num_out': 1.0, 'color_out': 0.35, 'dozen_out': 0.35, 'neighbors_out': 0.5, 'regions_out': 0.4, 'eohl_out': 0.25}, # <- Novos pesos
-                    metrics={'num_out': 'accuracy'})
+                  loss={'num_out': 'categorical_crossentropy',
+                        'color_out': 'categorical_crossentropy',
+                        'dozen_out': 'categorical_crossentropy',
+                        'neighbors_out': 'categorical_crossentropy',
+                        'regions_out': 'categorical_crossentropy',
+                        'eohl_out': 'categorical_crossentropy'},
+                  loss_weights={'num_out': 1.0, 'color_out': 0.35, 'dozen_out': 0.35, 'neighbors_out': 0.5, 'regions_out': 0.4, 'eohl_out': 0.25},
+                  metrics={'num_out': 'accuracy'})
 
     return model
 
@@ -510,18 +514,31 @@ class DQNAgent:
         self.train_step = 0
 
     # MUDANÇA: Arquitetura mais enxuta e LeakyReLU
-    def _build_model(self):
-        model = tf.keras.Sequential([
-            Dense(256, input_shape=(self.state_size,)),
-            LeakyReLU(alpha=0.1),
-            BatchNormalization(),
-            Dropout(0.3),
-            Dense(128),
-            LeakyReLU(alpha=0.1),
-            Dense(self.action_size, activation='linear')
-        ])
-        model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss='mse')
-        return model
+    # ... na classe DQNAgent, dentro de def _build_model(self): ...
+
+state_input = Input(shape=(self.state_size,))
+x = Dense(256)(state_input)
+x = LeakyReLU(alpha=0.1)(x)
+x = BatchNormalization()(x)
+x = Dropout(0.3)(x)
+
+# Stream para o valor do estado (V)
+value_stream = Dense(128)(x)
+value_stream = LeakyReLU(alpha=0.1)(value_stream)
+value_stream = Dense(1, activation='linear', name='value_out')(value_stream)
+
+# Stream para a vantagem da ação (A)
+advantage_stream = Dense(128)(x)
+advantage_stream = LeakyReLU(alpha=0.1)(advantage_stream)
+advantage_stream = Dense(self.action_size, activation='linear', name='advantage_out')(advantage_stream)
+
+# Combina as duas saídas para obter o valor Q
+q_values = Lambda(lambda x: x[0] + (x[1] - K.mean(x[1], axis=1, keepdims=True)),
+                  output_shape=(self.action_size,))([value_stream, advantage_stream])
+
+model = Model(inputs=state_input, outputs=q_values)
+model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss='mse')
+return model
 
     def update_target(self):
         try:
@@ -924,6 +941,7 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
