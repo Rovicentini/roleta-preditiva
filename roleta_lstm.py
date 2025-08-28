@@ -836,34 +836,6 @@ def train_lstm_on_recent_minibatch(model, history):
     except Exception as e:
         logger.error(f"Erro no treinamento LSTM: {e}")
 
-def train_lstm_on_recent_minibatch(model, history):
-    data = build_lstm_supervised_from_history(history)
-    if data is None:
-        return
-    
-    # ---------------------------------------------------------------------
-    # MUDANÇA: Agora espera 6 valores, incluindo y_neighbors
-    X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors = data
-    # ---------------------------------------------------------------------
-    
-    n = len(X_seq)
-    if n == 0:
-        return
-
-    k = min(n, LSTM_BATCH_SAMPLES)
-    idx = np.random.choice(n, k, replace=False)
-    try:
-        model.fit([X_seq[idx], X_feat[idx]],
-                  # ----------------------------------------------------
-                  # MUDANÇA: Inclui y_neighbors como um target para o fit
-                  [y_num[idx], y_color[idx], y_dozen[idx], y_neighbors[idx]],
-                  # ----------------------------------------------------
-                  epochs=LSTM_EPOCHS_PER_STEP,
-                  batch_size=LSTM_BATCH_SIZE,
-                  verbose=0)
-        logger.info(f"LSTM mini-train: {k} amostras de {n} ({LSTM_EPOCHS_PER_STEP} épocas).")
-    except Exception as e:
-        logger.error(f"Erro no treinamento LSTM: {e}")
 
 # --- UI ---
 st.set_page_config(layout="centered")
@@ -1026,6 +998,7 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
