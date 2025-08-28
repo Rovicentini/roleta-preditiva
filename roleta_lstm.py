@@ -540,19 +540,19 @@ model = Model(inputs=state_input, outputs=q_values)
 model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss='mse')
 return model
 
-    def update_target(self):
+def update_target(self):
         try:
             self.target_model.set_weights(self.model.get_weights())
         except Exception:
             pass
 
-    def remember(self, state, action, reward, next_state, done):
+def remember(self, state, action, reward, next_state, done):
         if state is None or next_state is None:
             return
         self.memory.append((state, action, reward, next_state, done))
 
     # MUDANÇA: Adicionado limiar de confiança
-    def act_top_k(self, state, k=3, use_epsilon=True):
+def act_top_k(self, state, k=3, use_epsilon=True):
         if state is None or len(state) == 0:
             return random.sample(range(self.action_size), k)
         
@@ -941,6 +941,7 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
