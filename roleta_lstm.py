@@ -675,6 +675,45 @@ def optimal_neighbors(number, max_neighbors=2):
         neigh.append(WHEEL_ORDER[(idx - i) % NUM_TOTAL])
         neigh.append(WHEEL_ORDER[(idx + i) % NUM_TOTAL])
     return list(dict.fromkeys(neigh))
+# Adicione esta função em seu script, fora de qualquer classe, como as outras funções utilitárias
+def filter_actions_by_region(actions, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD):
+    """
+    Filtra as ações sugeridas para garantir uma cobertura diversificada de regiões.
+    
+    Args:
+        actions (list): Lista de números sugeridos pelo DQN, ordenada por preferência.
+        max_neighbors (int): Raio de vizinhos a serem considerados como a mesma "região de aposta".
+        
+    Returns:
+        list: Uma nova lista de ações filtradas.
+    """
+    selected_actions = []
+    covered_regions = set()
+    
+    for action in actions:
+        
+        # Obter os vizinhos do número
+        action_neighbors = [action] + optimal_neighbors(action, max_neighbors=max_neighbors)
+        
+        # Verificar se a região já foi coberta
+        is_covered = False
+        for num in action_neighbors:
+            if num in covered_regions:
+                is_covered = True
+                break
+        
+        # Se a região não foi coberta, adicione a ação e sua região de cobertura
+        if not is_covered:
+            selected_actions.append(action)
+            covered_regions.update(action_neighbors)
+            
+        # Parar quando tivermos 3 ações diversificadas
+        if len(selected_actions) >= 3:
+            break
+            
+    # Se não conseguimos 3 ações diversas, retorne o que temos
+    return selected_actions if selected_actions else actions[:3]
+
 def calculate_top_n_accuracy(predictions, actual_number, top_n_values=[1, 3, 5]):
     """
     Calcula a Top-N Accuracy com base nas previsões e no número sorteado.
@@ -974,7 +1013,12 @@ if state is not None and agent is None:
     logger.info("Agente DQN criado (depois de estado)")
 
 if agent is not None and state is not None:
-    top_actions = agent.act_top_k(state, k=3, use_epsilon=True)
+    # Aumentei o k para que o DQN traga mais opções antes de filtrar
+    potential_actions = agent.act_top_k(state, k=3, use_epsilon=True) 
+    
+    # NOVO: Filtra as ações para garantir diversidade
+    top_actions = filter_actions_by_region(potential_actions, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
+
 else:
     top_actions = random.sample(range(NUM_TOTAL), 3)
     
@@ -1011,6 +1055,7 @@ for metric, data in st.session_state.top_n_metrics.items():
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
