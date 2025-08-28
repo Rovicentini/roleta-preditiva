@@ -93,15 +93,15 @@ REWARD_LOSS = -15.0
 NEIGHBOR_RADIUS_FOR_REWARD = 3
 
 # Treino LSTM incremental
-LSTM_RECENT_WINDOWS = 200
+LSTM_RECENT_WINDOWS = 100
 LSTM_BATCH_SAMPLES = min(len(history), 256)
 LSTM_EPOCHS_PER_STEP = 5
 LSTM_BATCH_SIZE = 32
 
 # Hiperparâmetros DQN (exploração)
 EPSILON_START = 1.0
-EPSILON_MIN = 0.1
-EPSILON_DECAY = 0.98
+EPSILON_MIN = 0.05
+EPSILON_DECAY = 0.97
 # MUDANÇA: Adicionado limiar de confiança para aposta
 CONFIDENCE_THRESHOLD = 0.1
 
@@ -227,10 +227,12 @@ def sequence_to_one_hot(sequence):
             one_hot_seq.append(np.zeros(NUM_TOTAL))
     return np.array(one_hot_seq)
 
+# Flag para alternar entre LSTM puro e híbrido
+USE_LSTM_ONLY = True  # mude para False para voltar a usar DQN
+
 def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
     seq_slice = sequence[-SEQUENCE_LEN:] if sequence else []
     
-    # MUDANÇA: Passando as estatísticas para a função de features
     features = get_advanced_features(seq_slice, feat_means, feat_stds)
     one_hot_seq = sequence_to_one_hot(seq_slice)
 
@@ -248,8 +250,6 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
                 dozen_probs = np.array(raw[2][0])
             else:
                 num_probs = np.array(raw)[0]
-                color_probs = np.array([0.0, 0.0, 0.0])
-                dozen_probs = np.array([0.0, 0.0, 0.0, 0.0])
         except Exception:
             pass
 
@@ -263,6 +263,7 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
     max_age = max(age_vector) if age_vector else 1
     age_vector = np.array([age / max(1, max_age) for age in age_vector])
 
+    # Streaks
     last_run_len_num = 0
     if len(sequence) >= 2:
         for i in range(1, len(sequence) + 1):
@@ -270,6 +271,7 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
                 last_run_len_num = i
             else:
                 break
+
     last_run_len_color = 0
     if len(sequence) >= 2:
         last_color = number_to_color(sequence[-1])
@@ -278,6 +280,7 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
                 last_run_len_color = i
             else:
                 break
+
     last_run_len_dozen = 0
     if len(sequence) >= 2:
         last_dozen = number_to_dozen(sequence[-1])
@@ -286,7 +289,12 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
                 last_run_len_dozen = i
             else:
                 break
-    run_length_features = np.array([last_run_len_num / SEQUENCE_LEN, last_run_len_color / SEQUENCE_LEN, last_run_len_dozen / SEQUENCE_LEN])
+
+    run_length_features = np.array([
+        last_run_len_num / SEQUENCE_LEN,
+        last_run_len_color / SEQUENCE_LEN,
+        last_run_len_dozen / SEQUENCE_LEN
+    ])
     
     last_num = sequence[-1] if sequence else -1
     last_color_one_hot = to_categorical(number_to_color(last_num), 3) if last_num in range(NUM_TOTAL) else np.zeros(3)
@@ -334,10 +342,11 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
             if total_co_occurrences > 0:
                 last_num_pulling_strength /= total_co_occurrences
     
+    # 🔹 ALTERAÇÃO PRINCIPAL: num_probs vem primeiro
     state = np.concatenate([
+        num_probs,
         one_hot_seq.flatten(),
         np.array(features),
-        num_probs,
         color_probs,
         dozen_probs,
         age_vector,
@@ -402,7 +411,7 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
 
     model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen, out_neighbors, out_regions, out_even_odd_high_low])
     
-    optimizer = Nadam(learning_rate=4e-4)
+    optimizer = Nadam(learning_rate=6e-4)
     model.compile(optimizer=optimizer,
                   loss={'num_out': 'categorical_crossentropy',
                         'color_out': 'categorical_crossentropy',
@@ -461,7 +470,7 @@ def predict_next_numbers(model, history, top_k=3):
         else:
             distance_factor = 1.0
         momentum = sum(1 for i in range(1,4) if len(history)>=i and history[-i] == num)
-        momentum_factor = 1 + momentum*0.4
+        momentum_factor = 1 + momentum*0.5
         
         neighbor_factor = 1 + neighbors_probs[WHEEL_ORDER.index(num)] * 3
         
@@ -1002,25 +1011,22 @@ if st.session_state.last_input is not None:
         st.error(f"Erro inesperado: {e}")
 
 # MUDANÇA: Passando as estatísticas para o state
-state = sequence_to_state(st.session_state.history, st.session_state.model,
-                           st.session_state.feat_stats['means'],
-                           st.session_state.feat_stats['stds'])
-agent = st.session_state.dqn_agent
-
-if state is not None and agent is None:
-    st.session_state.dqn_agent = DQNAgent(state_size=state.shape[0], action_size=NUM_TOTAL)
-    agent = st.session_state.dqn_agent
-    logger.info("Agente DQN criado (depois de estado)")
-
 if agent is not None and state is not None:
-    # Aumentei o k para que o DQN traga mais opções antes de filtrar
-    potential_actions = agent.act_top_k(state, k=3, use_epsilon=True) 
-    
-    # NOVO: Filtra as ações para garantir diversidade
-    top_actions = filter_actions_by_region(potential_actions, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
-
+    if USE_LSTM_ONLY:
+        # Pegamos diretamente do LSTM sem passar pelo DQN
+        pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
+        if pred_info and 'top_numbers' in pred_info:
+            top_actions = [n for n, _ in pred_info['top_numbers']]
+        else:
+            top_actions = random.sample(range(NUM_TOTAL), 3)
+    else:
+        # Aumentei o k para que o DQN traga mais opções antes de filtrar
+        potential_actions = agent.act_top_k(state, k=3, use_epsilon=True) 
+        # Filtra para garantir diversidade
+        top_actions = filter_actions_by_region(potential_actions, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
 else:
     top_actions = random.sample(range(NUM_TOTAL), 3)
+
     
 # MUDANÇA: Salvando as ações sugeridas
 st.session_state.prev_actions = top_actions
@@ -1055,6 +1061,7 @@ for metric, data in st.session_state.top_n_metrics.items():
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
