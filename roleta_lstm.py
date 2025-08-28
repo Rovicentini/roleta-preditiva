@@ -676,16 +676,20 @@ def predict_next_numbers(model, history, top_k=3):
         
         # --------------------------------------------------------------------------------
         # MUDANÇA: O modelo agora retorna uma lista com 4 elementos
-        if isinstance(raw, list) and len(raw) == 4:
-            num_probs = raw[0][0]
-            color_probs = raw[1][0]
-            dozen_probs = raw[2][0]
-            neighbors_probs = raw[3][0] # Nova saída
-        else:
-            num_probs = np.array(raw)[0]
-            color_probs = np.array([0.0, 0.0, 0.0])
-            dozen_probs = np.array([0.0, 0.0, 0.0, 0.0])
-            neighbors_probs = np.zeros(NUM_TOTAL) # Nova saída
+       if isinstance(raw, list) and len(raw) == 6:
+    num_probs = raw[0][0]
+    color_probs = raw[1][0]
+    dozen_probs = raw[2][0]
+    neighbors_probs = raw[3][0]
+    regions_probs = raw[4][0]  # Nova saída
+    eohl_probs = raw[5][0]     # Nova saída
+else:
+    num_probs = np.array(raw)[0]
+    color_probs = np.array([0.0, 0.0, 0.0])
+    dozen_probs = np.array([0.0, 0.0, 0.0, 0.0])
+    neighbors_probs = np.zeros(NUM_TOTAL)
+    regions_probs = np.zeros(len(REGIONS))
+    eohl_probs = np.zeros(4)
         # --------------------------------------------------------------------------------
 
     except Exception as e:
@@ -1022,6 +1026,7 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
