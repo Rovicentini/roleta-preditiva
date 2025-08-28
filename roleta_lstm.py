@@ -513,46 +513,40 @@ class DQNAgent:
         self.update_target()
         self.train_step = 0
 
-    # MUDANÇA: Arquitetura mais enxuta e LeakyReLU
-    # ... na classe DQNAgent, dentro de def _build_model(self): ...
+    def _build_model(self):
+        state_input = Input(shape=(self.state_size,))
+        x = Dense(256)(state_input)
+        x = LeakyReLU(alpha=0.1)(x)
+        x = BatchNormalization()(x)
+        x = Dropout(0.3)(x)
 
-state_input = Input(shape=(self.state_size,))
-x = Dense(256)(state_input)
-x = LeakyReLU(alpha=0.1)(x)
-x = BatchNormalization()(x)
-x = Dropout(0.3)(x)
+        value_stream = Dense(128)(x)
+        value_stream = LeakyReLU(alpha=0.1)(value_stream)
+        value_stream = Dense(1, activation='linear', name='value_out')(value_stream)
 
-# Stream para o valor do estado (V)
-value_stream = Dense(128)(x)
-value_stream = LeakyReLU(alpha=0.1)(value_stream)
-value_stream = Dense(1, activation='linear', name='value_out')(value_stream)
+        advantage_stream = Dense(128)(x)
+        advantage_stream = LeakyReLU(alpha=0.1)(advantage_stream)
+        advantage_stream = Dense(self.action_size, activation='linear', name='advantage_out')(advantage_stream)
 
-# Stream para a vantagem da ação (A)
-advantage_stream = Dense(128)(x)
-advantage_stream = LeakyReLU(alpha=0.1)(advantage_stream)
-advantage_stream = Dense(self.action_size, activation='linear', name='advantage_out')(advantage_stream)
+        q_values = Lambda(lambda x: x[0] + (x[1] - K.mean(x[1], axis=1, keepdims=True)),
+                          output_shape=(self.action_size,))([value_stream, advantage_stream])
 
-# Combina as duas saídas para obter o valor Q
-q_values = Lambda(lambda x: x[0] + (x[1] - K.mean(x[1], axis=1, keepdims=True)),
-                  output_shape=(self.action_size,))([value_stream, advantage_stream])
+        model = Model(inputs=state_input, outputs=q_values)
+        model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss='mse')
+        return model
 
-model = Model(inputs=state_input, outputs=q_values)
-model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss='mse')
-return model
-
-def update_target(self):
+    def update_target(self):
         try:
             self.target_model.set_weights(self.model.get_weights())
         except Exception:
             pass
 
-def remember(self, state, action, reward, next_state, done):
+    def remember(self, state, action, reward, next_state, done):
         if state is None or next_state is None:
             return
         self.memory.append((state, action, reward, next_state, done))
 
-    # MUDANÇA: Adicionado limiar de confiança
-def act_top_k(self, state, k=3, use_epsilon=True):
+    def act_top_k(self, state, k=3, use_epsilon=True):
         if state is None or len(state) == 0:
             return random.sample(range(self.action_size), k)
         
@@ -565,14 +559,12 @@ def act_top_k(self, state, k=3, use_epsilon=True):
             top_k_actions = []
             sorted_indices = np.argsort(q_values)[::-1]
             
-            # Filtra por limiar de confiança
             for idx in sorted_indices:
                 if q_values[idx] > CONFIDENCE_THRESHOLD:
                     top_k_actions.append(int(idx))
                 if len(top_k_actions) >= k:
                     break
             
-            # Se não houver números acima do limiar, retorna os mais prováveis
             if not top_k_actions:
                 return list(sorted_indices[:k])
             
@@ -581,7 +573,7 @@ def act_top_k(self, state, k=3, use_epsilon=True):
         except Exception:
             return random.sample(range(self.action_size), k)
 
-def act(self, state, use_epsilon=True):
+    def act(self, state, use_epsilon=True):
         if state is None or len(state) == 0:
             return random.randrange(self.action_size)
         if use_epsilon and np.random.rand() <= self.epsilon:
@@ -592,7 +584,7 @@ def act(self, state, use_epsilon=True):
         except Exception:
             return random.randrange(self.action_size)
 
-def replay(self, batch_size=REPLAY_BATCH):
+    def replay(self, batch_size=REPLAY_BATCH):
         if len(self.memory) < batch_size:
             return
         
@@ -627,17 +619,17 @@ def replay(self, batch_size=REPLAY_BATCH):
         try:
             self.model.fit(np.array(X), np.array(Y), epochs=1, verbose=0)
         except Exception as e:
-            logger.error(f"Erro no treinamento do DQN: {e}")
+            # logger.error(f"Erro no treinamento do DQN: {e}")
             pass
             
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-def load(self, path):
+    def load(self, path):
         self.model.load_weights(path)
         self.update_target()
 
-def save(self, path):
+    def save(self, path):
         self.model.save_weights(path)
 
 # --- Neighbors ---
@@ -941,6 +933,7 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
