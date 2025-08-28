@@ -663,80 +663,6 @@ def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
 
     return reward * bet_amount
 
-# --- PREDICTION POSTPROCESSING ---
-def predict_next_numbers(model, history, top_k=3):
-    if history is None or len(history) < SEQUENCE_LEN or model is None:
-        return []
-    try:
-        feat = np.array([get_advanced_features(history[-SEQUENCE_LEN:],
-                                               st.session_state.feat_stats['means'],
-                                               st.session_state.feat_stats['stds'])])
-        seq_one_hot = sequence_to_one_hot(history).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
-        raw = model.predict([seq_one_hot, feat], verbose=0)
-        
-        # --------------------------------------------------------------------------------
-        # MUDANÇA: O modelo agora retorna uma lista com 4 elementos
-        if isinstance(raw, list) and len(raw) == 6:
-            num_probs = raw[0][0]
-            color_probs = raw[1][0]
-            dozen_probs = raw[2][0]
-            neighbors_probs = raw[3][0]
-            regions_probs = raw[4][0]  # Nova saída
-            eohl_probs = raw[5][0]     # Nova saída
-        else:
-            num_probs = np.array(raw)[0]
-            color_probs = np.array([0.0, 0.0, 0.0])
-            dozen_probs = np.array([0.0, 0.0, 0.0, 0.0])
-            neighbors_probs = np.zeros(NUM_TOTAL)
-            regions_probs = np.zeros(len(REGIONS))
-            eohl_probs = np.zeros(4)
-        # --------------------------------------------------------------------------------
-
-    except Exception as e:
-        logger.error(f"Erro na previsão LSTM: {e}")
-        return []
-
-    temperature = 0.4
-    adjusted = np.log(num_probs + 1e-12) / temperature
-    adjusted = np.exp(adjusted)
-    adjusted /= adjusted.sum()
-
-    weighted = []
-    freq_counter = Counter(history[-100:])
-    last_num = history[-1] if len(history) > 0 else None
-    for num in range(NUM_TOTAL):
-        freq_factor = 1 + np.exp(freq_counter.get(num, 0) / 3 - 1)
-        if last_num in WHEEL_ORDER:
-            dist = WHEEL_DISTANCE[last_num][num]
-            distance_factor = max(0.1, 2.5 - (dist / 12.0))
-        else:
-            distance_factor = 1.0
-        momentum = sum(1 for i in range(1,4) if len(history)>=i and history[-i] == num)
-        momentum_factor = 1 + momentum*0.25
-        # ------------------------------------------------------------------------------------
-        # MUDANÇA: Incluindo a nova probabilidade de vizinhos na ponderação final
-        neighbor_factor = 1 + neighbors_probs[WHEEL_ORDER.index(num)] * 2 # Ajuste o peso conforme necessário
-        weighted.append(adjusted[num] * freq_factor * distance_factor * momentum_factor * neighbor_factor)
-        # ------------------------------------------------------------------------------------
-    
-    weighted = np.array(weighted)
-    if weighted.sum() == 0:
-        return []
-    weighted /= weighted.sum()
-
-    top_indices = list(np.argsort(weighted)[-top_k:][::-1])
-    color_pred = int(np.argmax(color_probs))
-    dozen_pred = int(np.argmax(dozen_probs))
-
-    return {
-        'top_numbers': [(int(i), float(weighted[i])) for i in top_indices],
-        'num_probs': num_probs,
-        'color_probs': color_probs,
-        'dozen_probs': dozen_probs,
-        'neighbors_probs': neighbors_probs, # Adiciona a nova previsão no retorno
-        'color_pred': color_pred,
-        'dozen_pred': dozen_pred
-    }
 
 # =========================
 # LSTM: construção de dataset e treino recente
@@ -998,6 +924,7 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
