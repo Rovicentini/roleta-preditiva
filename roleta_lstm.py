@@ -346,6 +346,9 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
 # =========================
 # MODELO LSTM – ARQUITETURA REFINADA
 # =========================
+# =========================
+# MODELO LSTM – ARQUITETURA REFINADA
+# =========================
 def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     seq_input = Input(shape=(seq_len, num_total), name='sequence_input')
 
@@ -376,23 +379,118 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     out_num = Dense(num_total, activation='softmax', name='num_out')(dense)
     out_color = Dense(3, activation='softmax', name='color_out')(dense)
     out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)
-    
-    # ----------------------------------------------------
-    # NOVO CÓDIGO INSERIDO AQUI
     out_neighbors = Dense(num_total, activation='softmax', name='neighbors_out')(dense)
 
-    model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen, out_neighbors])
+    # NOVO CÓDIGO AQUI
+    out_regions = Dense(len(REGIONS), activation='softmax', name='regions_out')(dense)
+    out_even_odd_high_low = Dense(4, activation='softmax', name='eohl_out')(dense)
+
+    # AQUI: O modelo agora tem 6 saídas
+    model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen, out_neighbors, out_regions, out_even_odd_high_low])
+    
     optimizer = Nadam(learning_rate=4e-4)
     model.compile(optimizer=optimizer,
                     loss={'num_out': 'categorical_crossentropy',
                           'color_out': 'categorical_crossentropy',
                           'dozen_out': 'categorical_crossentropy',
-                          'neighbors_out': 'categorical_crossentropy'}, # <- Nova perda
-                    loss_weights={'num_out': 1.0, 'color_out': 0.35, 'dozen_out': 0.35, 'neighbors_out': 0.5}, # <- Novo peso
+                          'neighbors_out': 'categorical_crossentropy',
+                          'regions_out': 'categorical_crossentropy', # <- Nova perda
+                          'eohl_out': 'categorical_crossentropy'}, # <- Nova perda
+                    loss_weights={'num_out': 1.0, 'color_out': 0.35, 'dozen_out': 0.35, 'neighbors_out': 0.5, 'regions_out': 0.4, 'eohl_out': 0.25}, # <- Novos pesos
                     metrics={'num_out': 'accuracy'})
-    # ----------------------------------------------------
 
     return model
+
+# --- PREDICTION POSTPROCESSING ---
+def predict_next_numbers(model, history, top_k=3):
+    if history is None or len(history) < SEQUENCE_LEN or model is None:
+        return []
+    try:
+        feat = np.array([get_advanced_features(history[-SEQUENCE_LEN:],
+                                                st.session_state.feat_stats['means'],
+                                                st.session_state.feat_stats['stds'])])
+        seq_one_hot = sequence_to_one_hot(history).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
+        raw = model.predict([seq_one_hot, feat], verbose=0)
+        
+        # MUDANÇA: O modelo agora retorna uma lista com 6 elementos
+        if isinstance(raw, list) and len(raw) == 6:
+            num_probs = raw[0][0]
+            color_probs = raw[1][0]
+            dozen_probs = raw[2][0]
+            neighbors_probs = raw[3][0]
+            regions_probs = raw[4][0] # Nova saída
+            eohl_probs = raw[5][0] # Nova saída
+        else:
+            num_probs = np.array(raw)[0]
+            color_probs = np.array([0.0, 0.0, 0.0])
+            dozen_probs = np.array([0.0, 0.0, 0.0, 0.0])
+            neighbors_probs = np.zeros(NUM_TOTAL)
+            regions_probs = np.zeros(len(REGIONS))
+            eohl_probs = np.zeros(4)
+    except Exception as e:
+        logger.error(f"Erro na previsão LSTM: {e}")
+        return []
+
+    temperature = 0.4
+    adjusted = np.log(num_probs + 1e-12) / temperature
+    adjusted = np.exp(adjusted)
+    adjusted /= adjusted.sum()
+
+    weighted = []
+    freq_counter = Counter(history[-100:])
+    last_num = history[-1] if len(history) > 0 else None
+    for num in range(NUM_TOTAL):
+        freq_factor = 1 + np.exp(freq_counter.get(num, 0) / 3 - 1)
+        if last_num in WHEEL_ORDER:
+            dist = WHEEL_DISTANCE[last_num][num]
+            distance_factor = max(0.1, 2.5 - (dist / 12.0))
+        else:
+            distance_factor = 1.0
+        momentum = sum(1 for i in range(1,4) if len(history)>=i and history[-i] == num)
+        momentum_factor = 1 + momentum*0.25
+        
+        neighbor_factor = 1 + neighbors_probs[WHEEL_ORDER.index(num)] * 2
+        
+        # NOVO: Inclusão dos fatores de região e Even/Odd/High/Low
+        region_factor = 1.0
+        eohl_factor = 1.0
+        
+        if len(history) > 0:
+            current_region_idx = number_to_region(num)
+            if current_region_idx != -1:
+                region_factor = 1 + regions_probs[current_region_idx] * 1.5
+
+            if num % 2 == 0 and num != 0: # par
+                eohl_factor = 1 + eohl_probs[0] * 1.5
+            elif num % 2 != 0: # ímpar
+                eohl_factor = 1 + eohl_probs[1] * 1.5
+            if 19 <= num <= 36: # alto
+                eohl_factor *= (1 + eohl_probs[2] * 1.5)
+            elif 1 <= num <= 18: # baixo
+                eohl_factor *= (1 + eohl_probs[3] * 1.5)
+
+        weighted.append(adjusted[num] * freq_factor * distance_factor * momentum_factor * neighbor_factor * region_factor * eohl_factor)
+
+    weighted = np.array(weighted)
+    if weighted.sum() == 0:
+        return []
+    weighted /= weighted.sum()
+
+    top_indices = list(np.argsort(weighted)[-top_k:][::-1])
+    color_pred = int(np.argmax(color_probs))
+    dozen_pred = int(np.argmax(dozen_probs))
+
+    return {
+        'top_numbers': [(int(i), float(weighted[i])) for i in top_indices],
+        'num_probs': num_probs,
+        'color_probs': color_probs,
+        'dozen_probs': dozen_probs,
+        'neighbors_probs': neighbors_probs,
+        'regions_probs': regions_probs,
+        'eohl_probs': eohl_probs,
+        'color_pred': color_pred,
+        'dozen_pred': dozen_pred
+    }
 # =========================
 # DQN Agent
 # =========================
@@ -639,8 +737,12 @@ def predict_next_numbers(model, history, top_k=3):
 # =========================
 # LSTM: construção de dataset e treino recente
 # =========================
+# =========================
+# LSTM: construção de dataset e treino recente
+# =========================
 def build_lstm_supervised_from_history(history):
-    X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors = [], [], [], [], [], []
+    # AQUI: Nova lista para os rótulos
+    X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors, y_regions, y_eohl = [], [], [], [], [], [], [], []
     if len(history) <= SEQUENCE_LEN:
         return None
 
@@ -651,8 +753,8 @@ def build_lstm_supervised_from_history(history):
 
         X_seq.append(sequence_to_one_hot(seq_slice))
         X_feat.append(get_advanced_features(seq_slice,
-                                            st.session_state.feat_stats['means'],
-                                            st.session_state.feat_stats['stds']))
+                                             st.session_state.feat_stats['means'],
+                                             st.session_state.feat_stats['stds']))
 
         if target in WHEEL_ORDER:
             pos = WHEEL_ORDER.index(target)
@@ -666,17 +768,29 @@ def build_lstm_supervised_from_history(history):
         dozen_label = number_to_dozen(target)
         y_dozen.append(to_categorical(dozen_label, 4))
         
-        # Novo target: Vizinhos
+        # Target: Vizinhos
         y_neighbors_data = np.zeros(NUM_TOTAL)
         if target in WHEEL_ORDER:
             target_neighbors = optimal_neighbors(target, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
             for neighbor in target_neighbors:
-                # Da o mesmo peso para todos os vizinhos
                 if neighbor in WHEEL_ORDER:
                     pos = WHEEL_ORDER.index(neighbor)
                     y_neighbors_data[pos] = 1.0 / len(target_neighbors)
         y_neighbors.append(y_neighbors_data)
 
+        # NOVO Target: Regiões
+        region_label = number_to_region(target)
+        y_regions.append(to_categorical(region_label, len(REGIONS)) if region_label != -1 else np.zeros(len(REGIONS)))
+
+        # NOVO Target: Par/Ímpar/Alto/Baixo
+        eohl_label = -1
+        if target == 0:
+            eohl_label = 3 # Representa o zero
+        elif target % 2 == 0:
+            eohl_label = 0 # Par
+        else:
+            eohl_label = 1 # Ímpar
+        y_eohl.append(to_categorical(eohl_label, 4))
 
     if len(X_seq) == 0:
         return None
@@ -687,9 +801,36 @@ def build_lstm_supervised_from_history(history):
     y_color = np.array(y_color)
     y_dozen = np.array(y_dozen)
     y_neighbors = np.array(y_neighbors)
+    y_regions = np.array(y_regions)
+    y_eohl = np.array(y_eohl)
     
-    # Retorna o novo target
-    return X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors
+    # Retorna os novos rótulos
+    return X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors, y_regions, y_eohl
+
+def train_lstm_on_recent_minibatch(model, history):
+    data = build_lstm_supervised_from_history(history)
+    if data is None:
+        return
+    
+    # MUDANÇA: Agora espera 8 valores, incluindo y_regions e y_eohl
+    X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors, y_regions, y_eohl = data
+    
+    n = len(X_seq)
+    if n == 0:
+        return
+
+    k = min(n, LSTM_BATCH_SAMPLES)
+    idx = np.random.choice(n, k, replace=False)
+    try:
+        model.fit([X_seq[idx], X_feat[idx]],
+                  # MUDANÇA: Inclui y_regions e y_eohl como targets
+                  [y_num[idx], y_color[idx], y_dozen[idx], y_neighbors[idx], y_regions[idx], y_eohl[idx]],
+                  epochs=LSTM_EPOCHS_PER_STEP,
+                  batch_size=LSTM_BATCH_SIZE,
+                  verbose=0)
+        logger.info(f"LSTM mini-train: {k} amostras de {n} ({LSTM_EPOCHS_PER_STEP} épocas).")
+    except Exception as e:
+        logger.error(f"Erro no treinamento LSTM: {e}")
 
 def train_lstm_on_recent_minibatch(model, history):
     data = build_lstm_supervised_from_history(history)
@@ -881,6 +1022,7 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
