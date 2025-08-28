@@ -93,15 +93,15 @@ REWARD_LOSS = -15.0
 NEIGHBOR_RADIUS_FOR_REWARD = 3
 
 # Treino LSTM incremental
-LSTM_RECENT_WINDOWS = 400
-LSTM_BATCH_SAMPLES = 128
-LSTM_EPOCHS_PER_STEP = 2
+LSTM_RECENT_WINDOWS = 200
+LSTM_BATCH_SAMPLES = min(len(history), 256)
+LSTM_EPOCHS_PER_STEP = 5
 LSTM_BATCH_SIZE = 32
 
 # Hiperparâmetros DQN (exploração)
 EPSILON_START = 1.0
-EPSILON_MIN = 0.05
-EPSILON_DECAY = 0.992
+EPSILON_MIN = 0.1
+EPSILON_DECAY = 0.98
 # MUDANÇA: Adicionado limiar de confiança para aposta
 CONFIDENCE_THRESHOLD = 0.1
 
@@ -410,7 +410,7 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
                         'neighbors_out': 'categorical_crossentropy',
                         'regions_out': 'categorical_crossentropy',
                         'eohl_out': 'categorical_crossentropy'},
-                  loss_weights={'num_out': 1.0, 'color_out': 0.35, 'dozen_out': 0.35, 'neighbors_out': 0.5, 'regions_out': 0.4, 'eohl_out': 0.25},
+                  loss_weights={'num_out': 1.5, 'color_out': 0.25, 'dozen_out': 0.25, 'neighbors_out': 0.7, 'regions_out': 0.3, 'eohl_out': 0.2},
                   metrics={'num_out': 'accuracy'})
 
     return model
@@ -461,9 +461,9 @@ def predict_next_numbers(model, history, top_k=3):
         else:
             distance_factor = 1.0
         momentum = sum(1 for i in range(1,4) if len(history)>=i and history[-i] == num)
-        momentum_factor = 1 + momentum*0.25
+        momentum_factor = 1 + momentum*0.4
         
-        neighbor_factor = 1 + neighbors_probs[WHEEL_ORDER.index(num)] * 2
+        neighbor_factor = 1 + neighbors_probs[WHEEL_ORDER.index(num)] * 3
         
         # NOVO: Inclusão dos fatores de região e Even/Odd/High/Low
         region_factor = 1.0
@@ -980,7 +980,7 @@ if st.session_state.last_input is not None:
                                                             st.session_state.feat_stats['means'],
                                                             st.session_state.feat_stats['stds'])
             # NOVO: Salva a previsão completa do LSTM antes de exibi-la
-            pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=5)
+            pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
             if 'top_numbers' in pred_info:
                 st.session_state.lstm_predictions = pred_info['top_numbers']
 
@@ -1055,6 +1055,7 @@ for metric, data in st.session_state.top_n_metrics.items():
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
