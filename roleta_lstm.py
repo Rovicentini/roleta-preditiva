@@ -54,18 +54,16 @@ if 'clear_input_bulk' not in st.session_state:
 if 'co_occurrence_matrix' not in st.session_state:
     st.session_state.co_occurrence_matrix = np.zeros((37, 37))
 
-
 if 'top_n_metrics' not in st.session_state:
     st.session_state.top_n_metrics = {
         'Top-1': {'hits': 0, 'total': 0},
         'Top-3': {'hits': 0, 'total': 0},
         'Top-5': {'hits': 0, 'total': 0}
     }
-    
+
 # MUDANÇA: Adicionado estado para armazenar estatísticas de normalização
 if 'feat_stats' not in st.session_state:
-    # Exemplo de valores. VOCÊ DEVE SUBSTITUIR ISSO POR ESTATÍSTICAS REAIS
-    # CALCULADAS EM UM GRANDE HISTÓRICO.
+    # Exemplo de valores. SUBSTITUA POR ESTATÍSTICAS REAIS DO SEU HISTÓRICO.
     st.session_state.feat_stats = {
         'means': np.array([0.5, 0.25, 0.5, 0.2, 0.5, 0.5, 0.5, 0.1]),
         'stds': np.array([0.2, 0.1, 0.2, 0.1, 0.1, 0.1, 0.1, 0.05])
@@ -94,7 +92,8 @@ NEIGHBOR_RADIUS_FOR_REWARD = 3
 
 # Treino LSTM incremental
 LSTM_RECENT_WINDOWS = 100
-LSTM_BATCH_SAMPLES = min(len(history), 256)
+# CORREÇÃO: não referenciar variável inexistente 'history'
+LSTM_BATCH_SAMPLES = 256
 LSTM_EPOCHS_PER_STEP = 5
 LSTM_BATCH_SIZE = 32
 
@@ -102,7 +101,7 @@ LSTM_BATCH_SIZE = 32
 EPSILON_START = 1.0
 EPSILON_MIN = 0.05
 EPSILON_DECAY = 0.97
-# MUDANÇA: Adicionado limiar de confiança para aposta
+# Limiar de confiança para sugerir aposta
 CONFIDENCE_THRESHOLD = 0.1
 
 # wheel order (posição física na roda)
@@ -116,9 +115,9 @@ RED_NUMBERS = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
 # Definindo as principais regiões da roleta
 REGIONS = {
     "zero_spiel": {0, 32, 15, 19, 4, 21, 2, 25}, # 8 números
-    "voisins_du_zero": {0, 2, 3, 4, 7, 12, 15, 18, 19, 21, 22, 25, 26, 28, 29, 32, 35, 36}, # 17 números (Vizinhos)
-    "tiers_du_cylindre": {27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33}, # 12 números (Terço)
-    "orphelins": {1, 6, 9, 14, 17, 20, 31, 34}, # 8 números (Órfãos)
+    "voisins_du_zero": {0, 2, 3, 4, 7, 12, 15, 18, 19, 21, 22, 25, 26, 28, 29, 32, 35, 36}, # 17 números
+    "tiers_du_cylindre": {27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33}, # 12 números
+    "orphelins": {1, 6, 9, 14, 17, 20, 31, 34}, # 8 números
     "juego_del_cero": {12, 15, 32, 19, 26, 3, 35, 0},
     "petite_serie": {5, 8, 10, 11, 13, 16, 23, 24, 27, 30, 33, 36}
 }
@@ -244,7 +243,8 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
             seq_arr = np.expand_dims(one_hot_seq, axis=0)
             feat_arr = np.array([features])
             raw = model.predict([seq_arr, feat_arr], verbose=0)
-            if isinstance(raw, list) and len(raw) == 3:
+            # CORREÇÃO: o modelo agora tem 6 saídas
+            if isinstance(raw, list) and len(raw) >= 3:
                 num_probs = np.array(raw[0][0])
                 color_probs = np.array(raw[1][0])
                 dozen_probs = np.array(raw[2][0])
@@ -342,7 +342,7 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
             if total_co_occurrences > 0:
                 last_num_pulling_strength /= total_co_occurrences
     
-    # 🔹 ALTERAÇÃO PRINCIPAL: num_probs vem primeiro
+    # 🔹 num_probs vem primeiro
     state = np.concatenate([
         num_probs,
         one_hot_seq.flatten(),
@@ -365,25 +365,17 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
 # =========================
 # MODELO LSTM – ARQUITETURA REFINADA
 # =========================
-# =========================
-# MODELO LSTM – ARQUITETURA REFINADA
-# =========================
 def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     seq_input = Input(shape=(seq_len, num_total), name='sequence_input')
 
-    # --- INÍCIO DA MUDANÇA: Substituindo as camadas LSTM ---
-    
-    # 1. Primeira camada LSTM agora é Bidirecional
+    # Bidirecional + BN + Dropout
     x = Bidirectional(LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4)))(seq_input)
     x = BatchNormalization()(x)
     x = Dropout(0.3)(x)
 
-    # 2. Segunda camada LSTM também é Bidirecional
     x = Bidirectional(LSTM(96, return_sequences=True, kernel_regularizer=l2(1e-4)))(x)
     x = BatchNormalization()(x)
     x = Dropout(0.5)(x)
-
-    # --- FIM DA MUDANÇA ---
     
     x_att = Attention(name="self_attention")([x, x])
 
@@ -405,11 +397,11 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     out_color = Dense(3, activation='softmax', name='color_out')(dense)
     out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)
     out_neighbors = Dense(num_total, activation='softmax', name='neighbors_out')(dense)
-
     out_regions = Dense(len(REGIONS), activation='softmax', name='regions_out')(dense)
     out_even_odd_high_low = Dense(4, activation='softmax', name='eohl_out')(dense)
 
-    model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen, out_neighbors, out_regions, out_even_odd_high_low])
+    model = Model(inputs=[seq_input, feat_input],
+                  outputs=[out_num, out_color, out_dozen, out_neighbors, out_regions, out_even_odd_high_low])
     
     optimizer = Nadam(learning_rate=6e-4)
     model.compile(optimizer=optimizer,
@@ -435,14 +427,14 @@ def predict_next_numbers(model, history, top_k=3):
         seq_one_hot = sequence_to_one_hot(history).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
         raw = model.predict([seq_one_hot, feat], verbose=0)
         
-        # MUDANÇA: O modelo agora retorna uma lista com 6 elementos
+        # O modelo agora retorna 6 saídas
         if isinstance(raw, list) and len(raw) == 6:
             num_probs = raw[0][0]
             color_probs = raw[1][0]
             dozen_probs = raw[2][0]
             neighbors_probs = raw[3][0]
-            regions_probs = raw[4][0] # Nova saída
-            eohl_probs = raw[5][0] # Nova saída
+            regions_probs = raw[4][0]
+            eohl_probs = raw[5][0]
         else:
             num_probs = np.array(raw)[0]
             color_probs = np.array([0.0, 0.0, 0.0])
@@ -474,7 +466,7 @@ def predict_next_numbers(model, history, top_k=3):
         
         neighbor_factor = 1 + neighbors_probs[WHEEL_ORDER.index(num)] * 3
         
-        # NOVO: Inclusão dos fatores de região e Even/Odd/High/Low
+        # Fatores de região e Even/Odd/High/Low
         region_factor = 1.0
         eohl_factor = 1.0
         
@@ -514,29 +506,26 @@ def predict_next_numbers(model, history, top_k=3):
         'color_pred': color_pred,
         'dozen_pred': dozen_pred
     }
-# Adicione esta função em seu script, logo após a função predict_next_numbers
 
 def calculate_top_n_accuracy(predictions, actual_number, top_n_values=[1, 3, 5]):
     """
     Calcula a Top-N Accuracy com base nas previsões e no número sorteado.
 
     Args:
-        predictions (dict): Dicionário de previsões do modelo, ordenado por probabilidade.
+        predictions (list): Lista de tuplas (número, probabilidade) ordenadas.
         actual_number (int): O número sorteado.
-        top_n_values (list): Lista de valores N para calcular a acurácia (ex: [1, 3, 5]).
+        top_n_values (list): Lista de valores N para calcular a acurácia.
 
     Returns:
-        dict: Um dicionário com a acurácia para cada N. Ex: {'Top-1': True, 'Top-3': True, 'Top-5': True}
+        dict: {'Top-1': True/False, 'Top-3': True/False, ...}
     """
-    sorted_numbers = list(predictions.keys())
-    
+    sorted_numbers = [num for num, _ in predictions]
     accuracy_results = {}
     for n in top_n_values:
         top_n_numbers = sorted_numbers[:n]
         accuracy_results[f'Top-{n}'] = actual_number in top_n_numbers
-        
     return accuracy_results
-    
+
 # =========================
 # DQN Agent
 # =========================
@@ -597,21 +586,16 @@ class DQNAgent:
         
         try:
             q_values = self.model.predict(np.array([state]), verbose=0)[0]
-            
             top_k_actions = []
             sorted_indices = np.argsort(q_values)[::-1]
-            
             for idx in sorted_indices:
                 if q_values[idx] > CONFIDENCE_THRESHOLD:
                     top_k_actions.append(int(idx))
                 if len(top_k_actions) >= k:
                     break
-            
             if not top_k_actions:
                 return list(sorted_indices[:k])
-            
             return top_k_actions
-            
         except Exception:
             return random.sample(range(self.action_size), k)
 
@@ -631,10 +615,8 @@ class DQNAgent:
             return
         
         batch = random.sample(self.memory, batch_size)
-        
         states = np.array([b[0] for b in batch])
         next_states = np.array([b[3] for b in batch])
-        
         if states.size == 0 or next_states.size == 0:
             return
         
@@ -647,21 +629,18 @@ class DQNAgent:
         X, Y = [], []
         for i, (state, actions, reward, next_state, done) in enumerate(batch):
             target = q_curr[i].copy()
-            
             for action in actions:
                 if done:
                     target[action] = reward
                 else:
                     next_q = q_next[i] if i < len(q_next) else np.zeros(self.action_size)
                     target[action] = reward + self.gamma * np.max(next_q)
-            
             X.append(state)
             Y.append(target)
         
         try:
             self.model.fit(np.array(X), np.array(Y), epochs=1, verbose=0)
-        except Exception as e:
-            # logger.error(f"Erro no treinamento do DQN: {e}")
+        except Exception:
             pass
             
         if self.epsilon > self.epsilon_min:
@@ -684,104 +663,54 @@ def optimal_neighbors(number, max_neighbors=2):
         neigh.append(WHEEL_ORDER[(idx - i) % NUM_TOTAL])
         neigh.append(WHEEL_ORDER[(idx + i) % NUM_TOTAL])
     return list(dict.fromkeys(neigh))
-# Adicione esta função em seu script, fora de qualquer classe, como as outras funções utilitárias
+
 def filter_actions_by_region(actions, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD):
     """
     Filtra as ações sugeridas para garantir uma cobertura diversificada de regiões.
-    
-    Args:
-        actions (list): Lista de números sugeridos pelo DQN, ordenada por preferência.
-        max_neighbors (int): Raio de vizinhos a serem considerados como a mesma "região de aposta".
-        
-    Returns:
-        list: Uma nova lista de ações filtradas.
     """
     selected_actions = []
     covered_regions = set()
-    
     for action in actions:
-        
-        # Obter os vizinhos do número
         action_neighbors = [action] + optimal_neighbors(action, max_neighbors=max_neighbors)
-        
-        # Verificar se a região já foi coberta
-        is_covered = False
-        for num in action_neighbors:
-            if num in covered_regions:
-                is_covered = True
-                break
-        
-        # Se a região não foi coberta, adicione a ação e sua região de cobertura
+        is_covered = any(num in covered_regions for num in action_neighbors)
         if not is_covered:
             selected_actions.append(action)
             covered_regions.update(action_neighbors)
-            
-        # Parar quando tivermos 3 ações diversificadas
         if len(selected_actions) >= 3:
             break
-            
-    # Se não conseguimos 3 ações diversas, retorne o que temos
     return selected_actions if selected_actions else actions[:3]
 
-def calculate_top_n_accuracy(predictions, actual_number, top_n_values=[1, 3, 5]):
-    """
-    Calcula a Top-N Accuracy com base nas previsões e no número sorteado.
-
-    Args:
-        predictions (list): Lista de tuplas (número, probabilidade) ordenadas.
-        actual_number (int): O número sorteado.
-        top_n_values (list): Lista de valores N para calcular a acurácia.
-
-    Returns:
-        dict: Um dicionário com a acurácia para cada N. Ex: {'Top-1': True, 'Top-3': True}
-    """
-    # A previsão do seu modelo (`pred_info['top_numbers']`) já é uma lista ordenada.
-    sorted_numbers = [num for num, prob in predictions]
-    
-    accuracy_results = {}
-    for n in top_n_values:
-        top_n_numbers = sorted_numbers[:n]
-        accuracy_results[f'Top-{n}'] = actual_number in top_n_numbers
-        
-    return accuracy_results
 # =========================
 # RECOMPENSA FOCADA E SIMPLIFICADA
 # =========================
-# MUDANÇA: Recompensa com penalidade por número de ações
 def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
                    max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD):
     reward = 0.0
     action_numbers = set([a for a in action_numbers if 0 <= a <= 36])
     
-    # Adiciona uma pequena penalidade por cada aposta
+    # Penalidade por quantidade de apostas
     bet_penalty = 0.1 * len(action_numbers)
 
     # 1. Acerto Exato
     if outcome_number in action_numbers:
         reward = REWARD_EXACT - bet_penalty
-    # 2. Acerto Vizinho
     else:
+        # 2. Acerto Vizinho
         all_neighbors = set()
         for a in action_numbers:
             all_neighbors.update(optimal_neighbors(a, max_neighbors=max_neighbors_for_reward))
-        
         if outcome_number in all_neighbors:
             reward = REWARD_NEIGHBOR - bet_penalty
-        # 3. Perda total
         else:
+            # 3. Perda total
             reward = REWARD_LOSS - bet_penalty
 
     return reward * bet_amount
 
-
-# =========================
-# LSTM: construção de dataset e treino recente
-# =========================
 # =========================
 # LSTM: construção de dataset e treino recente
 # =========================
 def build_lstm_supervised_from_history(history):
-    # AQUI: Nova lista para os rótulos
     X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors, y_regions, y_eohl = [], [], [], [], [], [], [], []
     if len(history) <= SEQUENCE_LEN:
         return None
@@ -818,18 +747,12 @@ def build_lstm_supervised_from_history(history):
                     y_neighbors_data[pos] = 1.0 / len(target_neighbors)
         y_neighbors.append(y_neighbors_data)
 
-        # NOVO Target: Regiões
+        # Target: Regiões
         region_label = number_to_region(target)
         y_regions.append(to_categorical(region_label, len(REGIONS)) if region_label != -1 else np.zeros(len(REGIONS)))
 
-        # NOVO Target: Par/Ímpar/Alto/Baixo
-        eohl_label = -1
-        if target == 0:
-            eohl_label = 3 # Representa o zero
-        elif target % 2 == 0:
-            eohl_label = 0 # Par
-        else:
-            eohl_label = 1 # Ímpar
+        # Target: Par/Ímpar/Alto/Baixo (+ zero como classe 3)
+        eohl_label = 3 if target == 0 else (0 if target % 2 == 0 else 1)
         y_eohl.append(to_categorical(eohl_label, 4))
 
     if len(X_seq) == 0:
@@ -844,7 +767,6 @@ def build_lstm_supervised_from_history(history):
     y_regions = np.array(y_regions)
     y_eohl = np.array(y_eohl)
     
-    # Retorna os novos rótulos
     return X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors, y_regions, y_eohl
 
 def train_lstm_on_recent_minibatch(model, history):
@@ -852,9 +774,7 @@ def train_lstm_on_recent_minibatch(model, history):
     if data is None:
         return
     
-    # MUDANÇA: Agora espera 8 valores, incluindo y_regions e y_eohl
     X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors, y_regions, y_eohl = data
-    
     n = len(X_seq)
     if n == 0:
         return
@@ -863,7 +783,6 @@ def train_lstm_on_recent_minibatch(model, history):
     idx = np.random.choice(n, k, replace=False)
     try:
         model.fit([X_seq[idx], X_feat[idx]],
-                  # MUDANÇA: Inclui y_regions e y_eohl como targets
                   [y_num[idx], y_color[idx], y_dozen[idx], y_neighbors[idx], y_regions[idx], y_eohl[idx]],
                   epochs=LSTM_EPOCHS_PER_STEP,
                   batch_size=LSTM_BATCH_SIZE,
@@ -871,7 +790,6 @@ def train_lstm_on_recent_minibatch(model, history):
         logger.info(f"LSTM mini-train: {k} amostras de {n} ({LSTM_EPOCHS_PER_STEP} épocas).")
     except Exception as e:
         logger.error(f"Erro no treinamento LSTM: {e}")
-
 
 # --- UI ---
 st.set_page_config(layout="centered")
@@ -898,11 +816,9 @@ if st.button("Adicionar histórico"):
                 for x in st.session_state.input_bulk.split(",")
                 if x.strip().isdigit() and 0 <= int(x.strip()) <= 36
             ]
-            
             for i in range(len(new_nums)):
                 st.session_state.history.append(new_nums[i])
                 st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
-
             st.success(f"Adicionados {len(new_nums)} números ao histórico.")
             st.session_state.clear_input_bulk = True
             st.rerun()
@@ -913,56 +829,50 @@ if st.button("Adicionar histórico"):
 
 st.markdown("---")
 
+# Formulário para entrada de um único número (último resultado)
 with st.form("num_form", clear_on_submit=True):
     num_input = st.number_input("Digite o último número (0-36):", min_value=0, max_value=36, step=1, key="current_number")
     submitted = st.form_submit_button("Enviar")
     if submitted:
         st.session_state.last_input = int(num_input)
 
+# Processa quando o usuário informa o último número
 if st.session_state.last_input is not None:
     try:
         num = int(st.session_state.last_input)
 
-        # NOVO: Se a previsão da jogada anterior existe, vamos checar a acurácia Top-N
+        # Checa acurácia das previsões anteriores (Top-N)
         if 'lstm_predictions' in st.session_state and st.session_state.lstm_predictions:
-            # O número que o usuário acabou de inserir é o resultado da rodada
-            new_results = calculate_top_n_accuracy(st.session_state.lstm_predictions, num, top_n_values=[1, 3, 5])
-            
-            # Atualiza as métricas
-            for metric, is_hit in new_results.items():
-                st.session_state.top_n_metrics[metric]['total'] += 1
-                if is_hit:
-                    st.session_state.top_n_metrics[metric]['hits'] += 1
-            
-            # Limpa a previsão anterior para a próxima rodada
+            acuracias = calculate_top_n_accuracy(st.session_state.lstm_predictions, num, top_n_values=[1, 3, 5])
+            for metrica, acertou in acuracias.items():
+                st.session_state.top_n_metrics[metrica]['total'] += 1
+                if acertou:
+                    st.session_state.top_n_metrics[metrica]['hits'] += 1
             st.session_state.lstm_predictions = None
 
         st.session_state.history.append(num)
         st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
-        
-        logger.info(f"Número novo inserido pelo usuário: {num}")
-        st.session_state.last_input = None
 
-        state_example = sequence_to_state(st.session_state.history, st.session_state.model)
-        if state_example is not None and (st.session_state.dqn_agent is None):
-            st.session_state.dqn_agent = DQNAgent(state_size=state_example.shape[0], action_size=NUM_TOTAL)
-            logger.info("Agente DQN criado")
+        # Inicializa DQN se ainda não existir
+        if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
+            exemplo_estado = sequence_to_state(st.session_state.history, st.session_state.model)
+            if exemplo_estado is not None:
+                st.session_state.dqn_agent = DQNAgent(state_size=exemplo_estado.shape[0], action_size=NUM_TOTAL)
 
+        # Reforço com resultado anterior
         if st.session_state.prev_state is not None and st.session_state.prev_actions is not None:
-            agent = st.session_state.dqn_agent
-            reward = compute_reward(st.session_state.prev_actions, num, bet_amount=BET_AMOUNT,
-                                    max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD)
-            next_state = sequence_to_state(st.session_state.history, st.session_state.model,
-                                            st.session_state.feat_stats['means'],
-                                            st.session_state.feat_stats['stds'])
+            recompensa = compute_reward(st.session_state.prev_actions, num, bet_amount=BET_AMOUNT,
+                                        max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD)
+            proximo_estado = sequence_to_state(st.session_state.history, st.session_state.model,
+                                               st.session_state.feat_stats['means'],
+                                               st.session_state.feat_stats['stds'])
+            if st.session_state.dqn_agent is not None:
+                st.session_state.dqn_agent.remember(st.session_state.prev_state, st.session_state.prev_actions, recompensa, proximo_estado, False)
 
-            if agent is not None:
-                agent.remember(st.session_state.prev_state, st.session_state.prev_actions, reward, next_state, False)
-                logger.info(f"Memorizado: ações={st.session_state.prev_actions}, resultado={num}, recompensa={reward}")
-
+            # Atualiza estatísticas
             st.session_state.stats['bets'] += 1
-            st.session_state.stats['profit'] += reward
-            if reward > 0:
+            st.session_state.stats['profit'] += recompensa
+            if recompensa > 0:
                 st.session_state.stats['wins'] += 1
                 st.session_state.stats['streak'] += 1
                 st.session_state.stats['max_streak'] = max(st.session_state.stats['max_streak'], st.session_state.stats['streak'])
@@ -970,116 +880,69 @@ if st.session_state.last_input is not None:
                 st.session_state.stats['streak'] = 0
 
             st.session_state.step_count += 1
-            if agent is not None and st.session_state.step_count % DQN_TRAIN_EVERY == 0:
-                agent.replay(REPLAY_BATCH)
-                logger.info(f"DQN treinado no passo {st.session_state.step_count}")
-            if agent is not None and st.session_state.step_count % TARGET_UPDATE_FREQ == 0:
-                agent.update_target()
-                logger.info(f"Target DQN atualizado no passo {st.session_state.step_count}")
+            if st.session_state.dqn_agent is not None and st.session_state.step_count % DQN_TRAIN_EVERY == 0:
+                st.session_state.dqn_agent.replay(REPLAY_BATCH)
+            if st.session_state.dqn_agent is not None and st.session_state.step_count % TARGET_UPDATE_FREQ == 0:
+                st.session_state.dqn_agent.update_target()
 
-        if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN*2:
+        # Inicializa e treina LSTM se já houver dados suficientes
+        if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
             st.session_state.model = build_deep_learning_model()
-            logger.info("Modelo LSTM criado")
-
-        if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN*2:
-            with st.spinner("Treinando LSTM com mini-batches recentes..."):
-                train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
-            
+        if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN * 2:
+            train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
             st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model,
                                                             st.session_state.feat_stats['means'],
                                                             st.session_state.feat_stats['stds'])
-            # NOVO: Salva a previsão completa do LSTM antes de exibi-la
+
             pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
-            if 'top_numbers' in pred_info:
+            if pred_info and 'top_numbers' in pred_info:
                 st.session_state.lstm_predictions = pred_info['top_numbers']
 
-            if pred_info:
-                st.subheader("🎯 Previsões (LSTM + pós-processamento)")
+                st.subheader("🎯 Previsões LSTM")
                 for n, conf in pred_info['top_numbers']:
-                    st.write(f"Número: **{n}** — Prob: {conf:.2%}")
-                color_names = {0: "Zero", 1: "Vermelho", 2: "Preto"}
-                dozen_names = {0: "Zero", 1: "1ª dúzia (1-12)", 2: "2ª dúzia (13-24)", 3: "3ª dúzia (25-36)"}
-                st.write(f"Cor mais provável: **{color_names.get(pred_info['color_pred'],'-')}** — probs: {pred_info['color_probs']}")
-                st.write(f"Dúzia mais provável: **{dozen_names.get(pred_info['dozen_pred'],'-')}** — probs: {pred_info['dozen_probs']}")
-            else:
-                st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model,
-                                                                st.session_state.feat_stats['means'],
-                                                                st.session_state.feat_stats['stds'])
+                    st.write(f"Número: **{n}** — Probabilidade: {conf:.2%}")
+
+        # Define ações sugeridas
+        if USE_LSTM_ONLY and st.session_state.model is not None:
+            pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
+            acoes_sugeridas = [n for n, _ in pred_info['top_numbers']] if pred_info else random.sample(range(NUM_TOTAL), 3)
+        elif st.session_state.dqn_agent is not None and st.session_state.prev_state is not None:
+            possiveis_acoes = st.session_state.dqn_agent.act_top_k(st.session_state.prev_state, k=5, use_epsilon=True)
+            acoes_sugeridas = filter_actions_by_region(possiveis_acoes, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
+        else:
+            acoes_sugeridas = random.sample(range(NUM_TOTAL), 3)
+
+        st.session_state.prev_actions = acoes_sugeridas
+
+        st.subheader("🤖 Ações sugeridas")
+        for acao in acoes_sugeridas:
+            vizinhos = optimal_neighbors(acao, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
+            st.write(f"- Apostar no {acao} (vizinhos: {', '.join(map(str, vizinhos))})")
 
     except Exception as e:
-        logger.exception("Erro inesperado ao processar entrada")
         st.error(f"Erro inesperado: {e}")
 
-# MUDANÇA: Passando as estatísticas para o state
-if agent is not None and state is not None:
-    if USE_LSTM_ONLY:
-        # Pegamos diretamente do LSTM sem passar pelo DQN
-        pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
-        if pred_info and 'top_numbers' in pred_info:
-            top_actions = [n for n, _ in pred_info['top_numbers']]
-        else:
-            top_actions = random.sample(range(NUM_TOTAL), 3)
-    else:
-        # Aumentei o k para que o DQN traga mais opções antes de filtrar
-        potential_actions = agent.act_top_k(state, k=3, use_epsilon=True) 
-        # Filtra para garantir diversidade
-        top_actions = filter_actions_by_region(potential_actions, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
-else:
-    top_actions = random.sample(range(NUM_TOTAL), 3)
-
-    
-# MUDANÇA: Salvando as ações sugeridas
-st.session_state.prev_actions = top_actions
-
-st.subheader("🤖 Ações sugeridas pela IA (DQN) com vizinhos")
-for action_num in top_actions:
-    neighbors = optimal_neighbors(action_num, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
-    st.write(f"- Aposta: **{action_num}** (Vizinhos: {', '.join(map(str, neighbors))})")
-
 st.markdown("---")
-st.subheader("📊 Estatísticas do Agente")
-stats = st.session_state.stats
-if stats['bets'] > 0:
-    win_rate = (stats['wins'] / stats['bets']) * 100
-    st.write(f"**Apostas:** {stats['bets']} | **Vitórias:** {stats['wins']} | **Taxa de Vitoria:** {win_rate:.2f}%")
-    st.write(f"**Seq. de Vitórias:** {stats['streak']} | **Máx. Seq. de Vitórias:** {stats['max_streak']}")
-    profit_color = "green" if stats['profit'] >= 0 else "red"
-    st.markdown(f"**Lucro total:** <span style='color:{profit_color}'>${stats['profit']:.2f}</span>", unsafe_allow_html=True)
+st.subheader("📊 Estatísticas")
+if st.session_state.stats['bets'] > 0:
+    taxa_vitoria = (st.session_state.stats['wins'] / st.session_state.stats['bets']) * 100
+    st.write(f"Apostas: {st.session_state.stats['bets']} | Vitórias: {st.session_state.stats['wins']} | Taxa de Vitória: {taxa_vitoria:.2f}%")
+    lucro_color = "green" if st.session_state.stats['profit'] >= 0 else "red"
+    st.markdown(f"Lucro total: <span style='color:{lucro_color}'>${st.session_state.stats['profit']:.2f}</span>", unsafe_allow_html=True)
 else:
-    st.write("Ainda não há estatísticas de apostas.")
+    st.write("Nenhuma estatística disponível ainda.")
 
-st.subheader("🎲 Histórico")
+# Histórico
+st.subheader("📜 Histórico de números")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
 
-st.subheader("Análise de Acurácia Top-N (LSTM)")
-for metric, data in st.session_state.top_n_metrics.items():
-    if data['total'] > 0:
-        accuracy = (data['hits'] / data['total']) * 100
-        st.metric(label=f"{metric} Acurácia", value=f"{accuracy:.2f}%", help=f"Baseado em {data['total']} previsões.")
+# Acurácia Top-N
+st.subheader("🎯 Acurácia LSTM")
+for metrica, dados in st.session_state.top_n_metrics.items():
+    if dados['total'] > 0:
+        acuracia = (dados['hits'] / dados['total']) * 100
+        st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
-        st.metric(label=f"{metric} Acurácia", value="N/A")
-
-st.subheader("🎲 Histórico")
-st.write(", ".join(map(str, st.session_state.history[::-1])))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        st.metric(label=metrica, value="N/A")
 
 
