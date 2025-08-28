@@ -376,17 +376,23 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     out_num = Dense(num_total, activation='softmax', name='num_out')(dense)
     out_color = Dense(3, activation='softmax', name='color_out')(dense)
     out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)
+    
+    # ----------------------------------------------------
+    # NOVO CÓDIGO INSERIDO AQUI
+    out_neighbors = Dense(num_total, activation='softmax', name='neighbors_out')(dense)
 
-    model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen])
+    model = Model(inputs=[seq_input, feat_input], outputs=[out_num, out_color, out_dozen, out_neighbors])
     optimizer = Nadam(learning_rate=4e-4)
     model.compile(optimizer=optimizer,
                     loss={'num_out': 'categorical_crossentropy',
                           'color_out': 'categorical_crossentropy',
-                          'dozen_out': 'categorical_crossentropy'},
-                    loss_weights={'num_out': 1.0, 'color_out': 0.35, 'dozen_out': 0.35},
+                          'dozen_out': 'categorical_crossentropy',
+                          'neighbors_out': 'categorical_crossentropy'}, # <- Nova perda
+                    loss_weights={'num_out': 1.0, 'color_out': 0.35, 'dozen_out': 0.35, 'neighbors_out': 0.5}, # <- Novo peso
                     metrics={'num_out': 'accuracy'})
-    return model
+    # ----------------------------------------------------
 
+    return model
 # =========================
 # DQN Agent
 # =========================
@@ -564,21 +570,26 @@ def predict_next_numbers(model, history, top_k=3):
     if history is None or len(history) < SEQUENCE_LEN or model is None:
         return []
     try:
-        # MUDANÇA: Passando as estatísticas para a função de features
         feat = np.array([get_advanced_features(history[-SEQUENCE_LEN:],
-                                             st.session_state.feat_stats['means'],
-                                             st.session_state.feat_stats['stds'])])
+                                               st.session_state.feat_stats['means'],
+                                               st.session_state.feat_stats['stds'])])
         seq_one_hot = sequence_to_one_hot(history).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
         raw = model.predict([seq_one_hot, feat], verbose=0)
         
-        if isinstance(raw, list) and len(raw) == 3:
+        # --------------------------------------------------------------------------------
+        # MUDANÇA: O modelo agora retorna uma lista com 4 elementos
+        if isinstance(raw, list) and len(raw) == 4:
             num_probs = raw[0][0]
             color_probs = raw[1][0]
             dozen_probs = raw[2][0]
+            neighbors_probs = raw[3][0] # Nova saída
         else:
             num_probs = np.array(raw)[0]
             color_probs = np.array([0.0, 0.0, 0.0])
             dozen_probs = np.array([0.0, 0.0, 0.0, 0.0])
+            neighbors_probs = np.zeros(NUM_TOTAL) # Nova saída
+        # --------------------------------------------------------------------------------
+
     except Exception as e:
         logger.error(f"Erro na previsão LSTM: {e}")
         return []
@@ -600,7 +611,11 @@ def predict_next_numbers(model, history, top_k=3):
             distance_factor = 1.0
         momentum = sum(1 for i in range(1,4) if len(history)>=i and history[-i] == num)
         momentum_factor = 1 + momentum*0.25
-        weighted.append(adjusted[num] * freq_factor * distance_factor * momentum_factor)
+        # ------------------------------------------------------------------------------------
+        # MUDANÇA: Incluindo a nova probabilidade de vizinhos na ponderação final
+        neighbor_factor = 1 + neighbors_probs[WHEEL_ORDER.index(num)] * 2 # Ajuste o peso conforme necessário
+        weighted.append(adjusted[num] * freq_factor * distance_factor * momentum_factor * neighbor_factor)
+        # ------------------------------------------------------------------------------------
     
     weighted = np.array(weighted)
     if weighted.sum() == 0:
@@ -610,11 +625,13 @@ def predict_next_numbers(model, history, top_k=3):
     top_indices = list(np.argsort(weighted)[-top_k:][::-1])
     color_pred = int(np.argmax(color_probs))
     dozen_pred = int(np.argmax(dozen_probs))
+
     return {
         'top_numbers': [(int(i), float(weighted[i])) for i in top_indices],
         'num_probs': num_probs,
         'color_probs': color_probs,
         'dozen_probs': dozen_probs,
+        'neighbors_probs': neighbors_probs, # Adiciona a nova previsão no retorno
         'color_pred': color_pred,
         'dozen_pred': dozen_pred
     }
@@ -623,7 +640,7 @@ def predict_next_numbers(model, history, top_k=3):
 # LSTM: construção de dataset e treino recente
 # =========================
 def build_lstm_supervised_from_history(history):
-    X_seq, X_feat, y_num, y_color, y_dozen = [], [], [], [], []
+    X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors = [], [], [], [], [], []
     if len(history) <= SEQUENCE_LEN:
         return None
 
@@ -633,10 +650,9 @@ def build_lstm_supervised_from_history(history):
         target = history[i+SEQUENCE_LEN]
 
         X_seq.append(sequence_to_one_hot(seq_slice))
-        # MUDANÇA: Passando as estatísticas para a função de features
         X_feat.append(get_advanced_features(seq_slice,
-                                           st.session_state.feat_stats['means'],
-                                           st.session_state.feat_stats['stds']))
+                                            st.session_state.feat_stats['means'],
+                                            st.session_state.feat_stats['stds']))
 
         if target in WHEEL_ORDER:
             pos = WHEEL_ORDER.index(target)
@@ -649,6 +665,18 @@ def build_lstm_supervised_from_history(history):
 
         dozen_label = number_to_dozen(target)
         y_dozen.append(to_categorical(dozen_label, 4))
+        
+        # Novo target: Vizinhos
+        y_neighbors_data = np.zeros(NUM_TOTAL)
+        if target in WHEEL_ORDER:
+            target_neighbors = optimal_neighbors(target, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
+            for neighbor in target_neighbors:
+                # Da o mesmo peso para todos os vizinhos
+                if neighbor in WHEEL_ORDER:
+                    pos = WHEEL_ORDER.index(neighbor)
+                    y_neighbors_data[pos] = 1.0 / len(target_neighbors)
+        y_neighbors.append(y_neighbors_data)
+
 
     if len(X_seq) == 0:
         return None
@@ -658,13 +686,21 @@ def build_lstm_supervised_from_history(history):
     y_num = np.array(y_num)
     y_color = np.array(y_color)
     y_dozen = np.array(y_dozen)
-    return X_seq, X_feat, y_num, y_color, y_dozen
+    y_neighbors = np.array(y_neighbors)
+    
+    # Retorna o novo target
+    return X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors
 
 def train_lstm_on_recent_minibatch(model, history):
     data = build_lstm_supervised_from_history(history)
     if data is None:
         return
-    X_seq, X_feat, y_num, y_color, y_dozen = data
+    
+    # ---------------------------------------------------------------------
+    # MUDANÇA: Agora espera 6 valores, incluindo y_neighbors
+    X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors = data
+    # ---------------------------------------------------------------------
+    
     n = len(X_seq)
     if n == 0:
         return
@@ -673,7 +709,10 @@ def train_lstm_on_recent_minibatch(model, history):
     idx = np.random.choice(n, k, replace=False)
     try:
         model.fit([X_seq[idx], X_feat[idx]],
-                  [y_num[idx], y_color[idx], y_dozen[idx]],
+                  # ----------------------------------------------------
+                  # MUDANÇA: Inclui y_neighbors como um target para o fit
+                  [y_num[idx], y_color[idx], y_dozen[idx], y_neighbors[idx]],
+                  # ----------------------------------------------------
                   epochs=LSTM_EPOCHS_PER_STEP,
                   batch_size=LSTM_BATCH_SIZE,
                   verbose=0)
@@ -842,6 +881,7 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
