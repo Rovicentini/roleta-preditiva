@@ -53,6 +53,14 @@ if 'clear_input_bulk' not in st.session_state:
     st.session_state.clear_input_bulk = False
 if 'co_occurrence_matrix' not in st.session_state:
     st.session_state.co_occurrence_matrix = np.zeros((37, 37))
+
+
+if 'top_n_metrics' not in st.session_state:
+    st.session_state.top_n_metrics = {
+        'Top-1': {'hits': 0, 'total': 0},
+        'Top-3': {'hits': 0, 'total': 0},
+        'Top-5': {'hits': 0, 'total': 0}
+    }
     
 # MUDANÇA: Adicionado estado para armazenar estatísticas de normalização
 if 'feat_stats' not in st.session_state:
@@ -497,6 +505,29 @@ def predict_next_numbers(model, history, top_k=3):
         'color_pred': color_pred,
         'dozen_pred': dozen_pred
     }
+# Adicione esta função em seu script, logo após a função predict_next_numbers
+
+def calculate_top_n_accuracy(predictions, actual_number, top_n_values=[1, 3, 5]):
+    """
+    Calcula a Top-N Accuracy com base nas previsões e no número sorteado.
+
+    Args:
+        predictions (dict): Dicionário de previsões do modelo, ordenado por probabilidade.
+        actual_number (int): O número sorteado.
+        top_n_values (list): Lista de valores N para calcular a acurácia (ex: [1, 3, 5]).
+
+    Returns:
+        dict: Um dicionário com a acurácia para cada N. Ex: {'Top-1': True, 'Top-3': True, 'Top-5': True}
+    """
+    sorted_numbers = list(predictions.keys())
+    
+    accuracy_results = {}
+    for n in top_n_values:
+        top_n_numbers = sorted_numbers[:n]
+        accuracy_results[f'Top-{n}'] = actual_number in top_n_numbers
+        
+    return accuracy_results
+    
 # =========================
 # DQN Agent
 # =========================
@@ -644,7 +675,27 @@ def optimal_neighbors(number, max_neighbors=2):
         neigh.append(WHEEL_ORDER[(idx - i) % NUM_TOTAL])
         neigh.append(WHEEL_ORDER[(idx + i) % NUM_TOTAL])
     return list(dict.fromkeys(neigh))
+def calculate_top_n_accuracy(predictions, actual_number, top_n_values=[1, 3, 5]):
+    """
+    Calcula a Top-N Accuracy com base nas previsões e no número sorteado.
 
+    Args:
+        predictions (list): Lista de tuplas (número, probabilidade) ordenadas.
+        actual_number (int): O número sorteado.
+        top_n_values (list): Lista de valores N para calcular a acurácia.
+
+    Returns:
+        dict: Um dicionário com a acurácia para cada N. Ex: {'Top-1': True, 'Top-3': True}
+    """
+    # A previsão do seu modelo (`pred_info['top_numbers']`) já é uma lista ordenada.
+    sorted_numbers = [num for num, prob in predictions]
+    
+    accuracy_results = {}
+    for n in top_n_values:
+        top_n_numbers = sorted_numbers[:n]
+        accuracy_results[f'Top-{n}'] = actual_number in top_n_numbers
+        
+    return accuracy_results
 # =========================
 # RECOMPENSA FOCADA E SIMPLIFICADA
 # =========================
@@ -823,8 +874,22 @@ with st.form("num_form", clear_on_submit=True):
 if st.session_state.last_input is not None:
     try:
         num = int(st.session_state.last_input)
+
+        # NOVO: Se a previsão da jogada anterior existe, vamos checar a acurácia Top-N
+        if 'lstm_predictions' in st.session_state and st.session_state.lstm_predictions:
+            # O número que o usuário acabou de inserir é o resultado da rodada
+            new_results = calculate_top_n_accuracy(st.session_state.lstm_predictions, num, top_n_values=[1, 3, 5])
+            
+            # Atualiza as métricas
+            for metric, is_hit in new_results.items():
+                st.session_state.top_n_metrics[metric]['total'] += 1
+                if is_hit:
+                    st.session_state.top_n_metrics[metric]['hits'] += 1
+            
+            # Limpa a previsão anterior para a próxima rodada
+            st.session_state.lstm_predictions = None
+
         st.session_state.history.append(num)
-        
         st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
         
         logger.info(f"Número novo inserido pelo usuário: {num}")
@@ -839,7 +904,6 @@ if st.session_state.last_input is not None:
             agent = st.session_state.dqn_agent
             reward = compute_reward(st.session_state.prev_actions, num, bet_amount=BET_AMOUNT,
                                     max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD)
-            # MUDANÇA: Passando as estatísticas para o state
             next_state = sequence_to_state(st.session_state.history, st.session_state.model,
                                             st.session_state.feat_stats['means'],
                                             st.session_state.feat_stats['stds'])
@@ -873,11 +937,13 @@ if st.session_state.last_input is not None:
             with st.spinner("Treinando LSTM com mini-batches recentes..."):
                 train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
             
-            # MUDANÇA: Passando as estatísticas para o state
             st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model,
-                                                             st.session_state.feat_stats['means'],
-                                                             st.session_state.feat_stats['stds'])
-            pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
+                                                            st.session_state.feat_stats['means'],
+                                                            st.session_state.feat_stats['stds'])
+            # NOVO: Salva a previsão completa do LSTM antes de exibi-la
+            pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=5)
+            if 'top_numbers' in pred_info:
+                st.session_state.lstm_predictions = pred_info['top_numbers']
 
             if pred_info:
                 st.subheader("🎯 Previsões (LSTM + pós-processamento)")
@@ -887,11 +953,10 @@ if st.session_state.last_input is not None:
                 dozen_names = {0: "Zero", 1: "1ª dúzia (1-12)", 2: "2ª dúzia (13-24)", 3: "3ª dúzia (25-36)"}
                 st.write(f"Cor mais provável: **{color_names.get(pred_info['color_pred'],'-')}** — probs: {pred_info['color_probs']}")
                 st.write(f"Dúzia mais provável: **{dozen_names.get(pred_info['dozen_pred'],'-')}** — probs: {pred_info['dozen_probs']}")
-        else:
-            # MUDANÇA: Passando as estatísticas para o state
-            st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model,
-                                                             st.session_state.feat_stats['means'],
-                                                             st.session_state.feat_stats['stds'])
+            else:
+                st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model,
+                                                                st.session_state.feat_stats['means'],
+                                                                st.session_state.feat_stats['stds'])
 
     except Exception as e:
         logger.exception("Erro inesperado ao processar entrada")
@@ -935,6 +1000,18 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
+st.subheader("Análise de Acurácia Top-N (LSTM)")
+for metric, data in st.session_state.top_n_metrics.items():
+    if data['total'] > 0:
+        accuracy = (data['hits'] / data['total']) * 100
+        st.metric(label=f"{metric} Acurácia", value=f"{accuracy:.2f}%", help=f"Baseado em {data['total']} previsões.")
+    else:
+        st.metric(label=f"{metric} Acurácia", value="N/A")
+
+st.subheader("🎲 Histórico")
+st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
