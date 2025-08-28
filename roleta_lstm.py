@@ -581,7 +581,7 @@ def act_top_k(self, state, k=3, use_epsilon=True):
         except Exception:
             return random.sample(range(self.action_size), k)
 
-    def act(self, state, use_epsilon=True):
+def act(self, state, use_epsilon=True):
         if state is None or len(state) == 0:
             return random.randrange(self.action_size)
         if use_epsilon and np.random.rand() <= self.epsilon:
@@ -592,7 +592,7 @@ def act_top_k(self, state, k=3, use_epsilon=True):
         except Exception:
             return random.randrange(self.action_size)
 
-    def replay(self, batch_size=REPLAY_BATCH):
+def replay(self, batch_size=REPLAY_BATCH):
         if len(self.memory) < batch_size:
             return
         
@@ -633,11 +633,11 @@ def act_top_k(self, state, k=3, use_epsilon=True):
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-    def load(self, path):
+def load(self, path):
         self.model.load_weights(path)
         self.update_target()
 
-    def save(self, path):
+def save(self, path):
         self.model.save_weights(path)
 
 # --- Neighbors ---
@@ -941,6 +941,7 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
