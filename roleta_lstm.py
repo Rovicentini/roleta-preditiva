@@ -11,6 +11,8 @@ from tensorflow.keras.regularizers import l2
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.layers import LeakyReLU
 from tensorflow.keras.layers import Bidirectional
+from tensorflow.keras.layers import Lambda
+from tensorflow.keras import backend as K
 from collections import Counter, deque
 import random
 import logging
@@ -933,6 +935,7 @@ else:
 
 st.subheader("🎲 Histórico")
 st.write(", ".join(map(str, st.session_state.history[::-1])))
+
 
 
 
