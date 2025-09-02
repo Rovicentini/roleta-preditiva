@@ -42,6 +42,16 @@ def log_dqn_step(episode, step, state, action, reward, q_values, epsilon, loss=N
     except Exception as e:
         logger.error(f"Erro ao registrar log DQN: {e}")
 
+def avaliar_previsao(apostas, sorteados, stats):
+    acertos = len(set(apostas) & set([sorteados]))
+    stats['acertos'] += acertos
+    stats['rodadas'] += 1
+
+    stats['top1'] += 1 if sorteados in apostas[:1] else 0
+    stats['top3'] += 1 if sorteados in apostas[:3] else 0
+    stats['top5'] += 1 if sorteados in apostas[:5] else 0
+
+    return stats
 
 # =========================
 # Utils Streamlit
@@ -102,7 +112,7 @@ BET_AMOUNT = 1.0
 
 # Replay/treino DQN
 TARGET_UPDATE_FREQ = 50
-REPLAY_BATCH = 100
+REPLAY_BATCH = 256
 REPLAY_SIZE = 5000
 DQN_TRAIN_EVERY = 5
 DQN_LEARNING_RATE = 1e-3
@@ -284,12 +294,18 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
             # CORREÇÃO: o modelo agora tem 6 saídas
             if isinstance(raw, list) and len(raw) >= 3:
                 num_probs = np.array(raw[0][0])
+                entropy = -np.sum(num_probs * np.log(num_probs + 1e-9))
+                entropy_norm = entropy / np.log(len(num_probs))
+                entropy_vector = np.array([entropy_norm])
                 color_probs = np.array(raw[1][0])
                 dozen_probs = np.array(raw[2][0])
             else:
                 num_probs = np.array(raw)[0]
         except Exception:
             pass
+        entropy = -np.sum(num_probs * np.log(num_probs + 1e-9))
+        entropy_norm = entropy / np.log(len(num_probs))
+        entropy_vector = np.array([entropy_norm])
 
     age_vector = [0] * NUM_TOTAL
     last_seen = {num: i for i, num in enumerate(sequence)}
@@ -419,9 +435,19 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
         freq_vector,
         color_vector,
         region_vector,
+        entropy_vector,
     ]).astype(np.float32)
 
     return state
+
+def filtrar_apostas_por_confianca(probabilidades, q_values, freq_vector, limiar=0.6):
+    score = (
+        0.5 * np.array(probabilidades) +
+        0.3 * np.array(q_values) +
+        0.2 * np.array(freq_vector)
+    )
+    indices = np.where(score >= limiar)[0]
+    return indices.tolist()
 
 # =========================
 # MODELO LSTM – ARQUITETURA REFINADA
@@ -499,23 +525,22 @@ def predict_next_numbers(model, history, top_k=3):
         raw = model.predict([seq_one_hot, feat], verbose=0)
         
         # O modelo agora retorna 6 saídas
-        if isinstance(raw, list) and len(raw) == 6:
-            num_probs = raw[0][0]
-            color_probs = raw[1][0]
-            dozen_probs = raw[2][0]
-            neighbors_probs = raw[3][0]
-            regions_probs = raw[4][0]
-            eohl_probs = raw[5][0]
+        if isinstance(raw, list) and len(raw) >= 3:
+            num_probs = np.array(raw[0][0])
+            color_probs = np.array(raw[1][0])
+            dozen_probs = np.array(raw[2][0])
         else:
             num_probs = np.array(raw)[0]
-            color_probs = np.array([0.0, 0.0, 0.0])
-            dozen_probs = np.array([0.0, 0.0, 0.0, 0.0])
-            neighbors_probs = np.zeros(NUM_TOTAL)
-            regions_probs = np.zeros(len(REGIONS))
-            eohl_probs = np.zeros(4)
+
+        # ✅ Cálculo da entropia com base em num_probs
+        entropy = -np.sum(num_probs * np.log(num_probs + 1e-9))
+        entropy_norm = entropy / np.log(len(num_probs))
+        entropy_vector = np.array([entropy_norm])
+
     except Exception as e:
         logger.error(f"Erro na previsão LSTM: {e}")
         return []
+
 
     temperature = 0.25
     adjusted = np.log(num_probs + 1e-12) / temperature
@@ -763,27 +788,40 @@ def filter_actions_by_region(actions, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD):
 # =========================
 def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
                    max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD):
-    reward = 0.0
     action_numbers = set([a for a in action_numbers if 0 <= a <= 36])
-    
+    acertos_exatos = 1 if outcome_number in action_numbers else 0
+
     # Penalidade por quantidade de apostas
     bet_penalty = 0.1 * len(action_numbers)
 
-    # 1. Acerto Exato
-    if outcome_number in action_numbers:
-        reward = REWARD_EXACT - bet_penalty
-    else:
-        # 2. Acerto Vizinho
-        all_neighbors = set()
-        for a in action_numbers:
-            all_neighbors.update(optimal_neighbors(a, max_neighbors=max_neighbors_for_reward))
-        if outcome_number in all_neighbors:
-            reward = REWARD_NEIGHBOR - bet_penalty
-        else:
-            # 3. Perda total
-            reward = REWARD_LOSS - bet_penalty
+    # Acerto vizinho
+    all_neighbors = set()
+    for a in action_numbers:
+        all_neighbors.update(optimal_neighbors(a, max_neighbors=max_neighbors_for_reward))
+    acerto_vizinho = 1 if outcome_number in all_neighbors else 0
+
+    # Recompensa proporcional
+    reward = 0.0
+    reward += acertos_exatos * REWARD_EXACT
+    reward += acerto_vizinho * REWARD_NEIGHBOR
+
+    # Penalidade por apostas amplas
+    if len(action_numbers) > 10:
+        reward -= 1.0
+
+    # Bônus por múltiplos acertos
+    if acertos_exatos + acerto_vizinho >= 3:
+        reward += 2.0
+
+    # Bônus por streak
+    if 'stats' in st.session_state and st.session_state.stats.get('streak', 0) >= 3:
+        reward += 1.0
+
+    # Penalidade proporcional ao número de apostas
+    reward -= bet_penalty
 
     return reward * bet_amount
+
 
 # =========================
 # LSTM: construção de dataset e treino recente
@@ -1040,7 +1078,20 @@ if st.session_state.last_input is not None:
 
         st.session_state.history.append(num)
         st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
+        st.session_state.stats = avaliar_previsao(apostas_final, num, st.session_state.stats)
 
+
+ # Avalia a previsão da rodada
+st.session_state.stats = avaliar_previsao(apostas_final, num, st.session_state.stats)
+
+# Exibe painel de métricas
+st.markdown("### 📊 Métricas de Acurácia")
+st.write(f"Total de rodadas: {st.session_state.stats['rodadas']}")
+st.write(f"Total de acertos: {st.session_state.stats['acertos']}")
+st.write(f"Top‑1: {st.session_state.stats['top1']} acertos")
+st.write(f"Top‑3: {st.session_state.stats['top3']} acertos")
+st.write(f"Top‑5: {st.session_state.stats['top5']} acertos")
+       
         # Inicializa DQN se ainda não existir
         if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
             exemplo_estado = sequence_to_state(st.session_state.history, st.session_state.model)
@@ -1048,29 +1099,66 @@ if st.session_state.last_input is not None:
                 st.session_state.dqn_agent = DQNAgent(state_size=exemplo_estado.shape[0], action_size=NUM_TOTAL)
 
         # Reforço com resultado anterior
-        if st.session_state.prev_state is not None and st.session_state.prev_actions is not None:
-            recompensa = compute_reward(st.session_state.prev_actions, num, bet_amount=BET_AMOUNT,
-                                        max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD)
-            proximo_estado = sequence_to_state(st.session_state.history, st.session_state.model,
-                                               st.session_state.feat_stats['means'],
-                                               st.session_state.feat_stats['stds'])
-            if st.session_state.dqn_agent is not None:
-                st.session_state.dqn_agent.remember(st.session_state.prev_state, st.session_state.prev_actions, recompensa, proximo_estado, False)
+        if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
+    exemplo_estado = sequence_to_state(
+        st.session_state.history,
+        st.session_state.model,
+        st.session_state.feat_stats['means'],
+        st.session_state.feat_stats['stds']
+    )
+    if exemplo_estado is not None:
+        st.session_state.dqn_agent = DQNAgent(
+            state_size=exemplo_estado.shape[0],
+            action_size=NUM_TOTAL
+        )
 
-            if st.session_state.dqn_agent is not None:
-                try:
-                    q_vals = st.session_state.dqn_agent.model.predict(np.array([st.session_state.prev_state]), verbose=0)[0]
-                    log_dqn_step(
-                        episode=1,  # ou use um contador se quiser
-                        step=st.session_state.step_count,
-                        state=st.session_state.prev_state,
-                    action=st.session_state.prev_actions,
-                    reward=recompensa,
-                    q_values=q_vals,
-                    epsilon=st.session_state.dqn_agent.epsilon
-                    )
-                except Exception as e:
-                    logger.error(f"Erro ao logar passo DQN: {e}")
+# Reforço com resultado anterior
+if st.session_state.prev_state is not None and st.session_state.prev_actions is not None:
+    recompensa = compute_reward(
+        st.session_state.prev_actions,
+        num,
+        bet_amount=BET_AMOUNT,
+        max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD
+    )
+
+    proximo_estado = sequence_to_state(
+        st.session_state.history,
+        st.session_state.model,
+        st.session_state.feat_stats['means'],
+        st.session_state.feat_stats['stds']
+    )
+
+    if st.session_state.dqn_agent is not None:
+        st.session_state.dqn_agent.remember(
+            st.session_state.prev_state,
+            st.session_state.prev_actions,
+            recompensa,
+            proximo_estado,
+            False
+        )
+
+    if st.session_state.dqn_agent is not None:
+        try:
+            q_vals = st.session_state.dqn_agent.model.predict(
+                np.array([st.session_state.prev_state]),
+                verbose=0
+            )[0]
+
+            log_dqn_step(
+                episode=1,
+                step=st.session_state.step_count,
+                state=st.session_state.prev_state,
+                action=st.session_state.prev_actions,
+                reward=recompensa,
+                q_values=q_vals,
+                epsilon=st.session_state.dqn_agent.epsilon
+            )
+        except Exception as e:
+            logger.error(f"Erro ao logar passo DQN: {e}")
+
+        # ✅ Aplicando filtro de apostas por confiança combinada
+        apostas_final = filtrar_apostas_por_confianca(num_probs, q_vals, freq_vector)
+
 
             # Atualiza estatísticas
             st.session_state.stats['bets'] += 1
@@ -1083,7 +1171,7 @@ if st.session_state.last_input is not None:
                 st.session_state.stats['streak'] = 0
 
             st.session_state.step_count += 1
-            if st.session_state.dqn_agent is not None and st.session_state.step_count % DQN_TRAIN_EVERY == 0:
+            if st.session_state.dqn_agent is not None:
                 st.session_state.dqn_agent.replay(REPLAY_BATCH)
             if st.session_state.dqn_agent is not None and st.session_state.step_count % TARGET_UPDATE_FREQ == 0:
                 st.session_state.dqn_agent.update_target()
@@ -1147,6 +1235,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
