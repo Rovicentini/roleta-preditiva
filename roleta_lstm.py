@@ -900,15 +900,15 @@ if st.button("Adicionar histórico"):
             st.success(f"Adicionados {len(new_nums)} números ao histórico.")
             # === Pré-treino offline após carga em massa ===
 # 1) Garante que o modelo exista
-if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
-    st.session_state.model = build_deep_learning_model()
+            if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
+                st.session_state.model = build_deep_learning_model()
 
 # 2) Treina o LSTM em TODO o histórico (batch offline)
-if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN * 2:
-    train_lstm_on_full_history(
-    st.session_state.model,
-    st.session_state.history
-)
+            if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN * 2:
+                train_lstm_on_full_history(
+                    st.session_state.model,
+                    st.session_state.history
+                )
 
 # 3) Inicializa o DQN (se necessário)
 exemplo_estado = sequence_to_state(
@@ -1066,6 +1066,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
