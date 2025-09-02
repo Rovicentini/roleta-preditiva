@@ -1083,21 +1083,44 @@ if st.session_state.last_input is not None:
         )
 
         # ✅ Avalia a previsão da rodada
-        try:
-    st.session_state.stats = avaliar_previsao(apostas_final, num, st.session_state.stats)
+        if st.session_state.last_input is not None:
+    try:
+        num = int(st.session_state.last_input)
 
-    # Exibe painel de métricas
-    st.markdown("### 📊 Métricas de Acurácia")
-    st.write(f"Total de rodadas: {st.session_state.stats['rodadas']}")
-    st.write(f"Total de acertos: {st.session_state.stats['acertos']}")
-    st.write(f"Top‑1: {st.session_state.stats['top1']} acertos")
-    st.write(f"Top‑3: {st.session_state.stats['top3']} acertos")
-    st.write(f"Top‑5: {st.session_state.stats['top5']} acertos")
+        # Checa acurácia das previsões anteriores (Top-N)
+        if 'lstm_predictions' in st.session_state and st.session_state.lstm_predictions:
+            acuracias = calculate_top_n_accuracy(
+                st.session_state.lstm_predictions,
+                num,
+                top_n_values=[1, 3, 5]
+            )
+            for metrica, acertou in acuracias.items():
+                st.session_state.top_n_metrics[metrica]['total'] += 1
+                if acertou:
+                    st.session_state.top_n_metrics[metrica]['hits'] += 1
+            st.session_state.lstm_predictions = None
 
-except Exception as e:
-    logger.error(f"Erro ao processar entrada: {e}")
+        st.session_state.history.append(num)
+        st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(
+            st.session_state.co_occurrence_matrix,
+            st.session_state.history
+        )
 
-# Fora do try–except, alinhado corretamente
+        # Avalia a previsão da rodada
+        st.session_state.stats = avaliar_previsao(apostas_final, num, st.session_state.stats)
+
+        # Exibe painel de métricas
+        st.markdown("### 📊 Métricas de Acurácia")
+        st.write(f"Total de rodadas: {st.session_state.stats['rodadas']}")
+        st.write(f"Total de acertos: {st.session_state.stats['acertos']}")
+        st.write(f"Top‑1: {st.session_state.stats['top1']} acertos")
+        st.write(f"Top‑3: {st.session_state.stats['top3']} acertos")
+        st.write(f"Top‑5: {st.session_state.stats['top5']} acertos")
+
+    except Exception as e:
+        logger.error(f"Erro ao processar entrada: {e}")
+
+# Inicializa DQN se ainda não existir
 if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
     exemplo_estado = sequence_to_state(
         st.session_state.history,
@@ -1110,6 +1133,7 @@ if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUE
             state_size=exemplo_estado.shape[0],
             action_size=NUM_TOTAL
         )
+
 
 
 
@@ -1250,6 +1274,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
