@@ -98,6 +98,18 @@ LSTM_EPOCHS_PER_STEP = 5
 LSTM_BATCH_SIZE = 32
 
 # Hiperparâmetros DQN (exploração)
+def get_training_params(history_length):
+    if history_length < 100:
+        return 10, 16
+    elif history_length < 500:
+        return 15, 32
+    elif history_length < 1000:
+        return 20, 64
+    elif history_length < 5000:
+        return 25, 128
+    else:
+        return 30, 256
+
 EPSILON_START = 1.0
 EPSILON_MIN = 0.05
 EPSILON_DECAY = 0.97
@@ -790,6 +802,70 @@ def train_lstm_on_recent_minibatch(model, history):
         logger.info(f"LSTM mini-train: {k} amostras de {n} ({LSTM_EPOCHS_PER_STEP} épocas).")
     except Exception as e:
         logger.error(f"Erro no treinamento LSTM: {e}")
+def train_lstm_on_full_history(model, history, epochs=20, batch_size=64):
+    """
+    Treina o LSTM usando TODO o histórico disponível (batch offline).
+    Use epochs e batch_size maiores que no treino incremental.
+    """
+    data = build_lstm_supervised_from_history(history)
+    if data is None:
+        st.warning("Histórico insuficiente para treino em massa.")
+        return
+
+    X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors, y_regions, y_eohl = data
+
+    with st.spinner(f"Treinando LSTM no histórico completo ({len(X_seq)} amostras, epochs={epochs}, batch_size={batch_size})..."):
+    try:
+        epochs, batch_size = get_training_params(len(history))
+        model.fit([X_seq, X_feat],
+                  [y_num, y_color, y_dozen, y_neighbors, y_regions, y_eohl],
+                  epochs=epochs,
+                  batch_size=batch_size,
+                  verbose=0)
+        st.success(f"LSTM treinado com {len(X_seq)} amostras (epochs={epochs}, batch_size={batch_size}).")
+    except Exception as e:
+        st.error(f"Erro no treino em massa do LSTM: {e}")
+
+
+def preload_dqn_with_history(agent, history, model, top_k=3):
+    """
+    Preenche a memória de replay do DQN usando o histórico:
+    - Para cada estado, usa as previsões do LSTM (top_k) como "ações tomadas"
+    - Calcula a recompensa contra o próximo número real
+    - Armazena (state, actions, reward, next_state) no replay
+    """
+    if agent is None or model is None or len(history) <= SEQUENCE_LEN:
+        return
+
+    count = 0
+    with st.spinner("Pré-carregando memória do DQN a partir do histórico..."):
+        for i in range(SEQUENCE_LEN, len(history)):
+            past = history[:i]
+            # Estado atual
+            state = sequence_to_state(past, model,
+                                      st.session_state.feat_stats['means'],
+                                      st.session_state.feat_stats['stds'])
+            # Previsões do LSTM para esse estado
+            pred = predict_next_numbers(model, past, top_k=top_k)
+            if pred and 'top_numbers' in pred and pred['top_numbers']:
+                actions = [n for n, _ in pred['top_numbers']]
+            else:
+                actions = [random.randrange(NUM_TOTAL)]
+
+            # Próximo estado e outcome observado
+            next_state = sequence_to_state(history[:i+1], model,
+                                           st.session_state.feat_stats['means'],
+                                           st.session_state.feat_stats['stds'])
+            outcome = history[i]
+            reward = compute_reward(actions, outcome,
+                                    bet_amount=BET_AMOUNT,
+                                    max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD)
+
+            agent.remember(state, actions, reward, next_state, False)
+            count += 1
+
+    st.success(f"Replay do DQN pré-carregado com {count} transições.")
+
 
 # --- UI ---
 st.set_page_config(layout="centered")
@@ -820,6 +896,50 @@ if st.button("Adicionar histórico"):
                 st.session_state.history.append(new_nums[i])
                 st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
             st.success(f"Adicionados {len(new_nums)} números ao histórico.")
+            # === Pré-treino offline após carga em massa ===
+# 1) Garante que o modelo exista
+if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
+    st.session_state.model = build_deep_learning_model()
+
+# 2) Treina o LSTM em TODO o histórico (batch offline)
+if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN * 2:
+    train_lstm_on_full_history(
+    st.session_state.model,
+    st.session_state.history
+)
+
+# 3) Inicializa o DQN (se necessário)
+exemplo_estado = sequence_to_state(
+    st.session_state.history,
+    st.session_state.model,
+    st.session_state.feat_stats['means'],
+    st.session_state.feat_stats['stds']
+)
+if st.session_state.dqn_agent is None and exemplo_estado is not None:
+    st.session_state.dqn_agent = DQNAgent(state_size=exemplo_estado.shape[0], action_size=NUM_TOTAL)
+
+# 4) Pré-carrega replay do DQN com pares (state, actions=LSTM_topk, reward, next_state)
+if st.session_state.dqn_agent is not None and st.session_state.model is not None:
+    preload_dqn_with_history(
+        st.session_state.dqn_agent,
+        st.session_state.history,
+        st.session_state.model,
+        top_k=3
+    )
+    # 5) Executa algumas iterações de treino em cima do replay carregado
+    with st.spinner("Executando treino inicial do DQN..."):
+        for _ in range(40):   # ajuste fino: 20–100
+            st.session_state.dqn_agent.replay(REPLAY_BATCH)
+        st.session_state.dqn_agent.update_target()
+    st.success("DQN pré-treinado com o histórico.")
+# Opcional: Atualiza prev_state para próxima decisão já usar o modelo afinado
+st.session_state.prev_state = sequence_to_state(
+    st.session_state.history,
+    st.session_state.model,
+    st.session_state.feat_stats['means'],
+    st.session_state.feat_stats['stds']
+)
+
             st.session_state.clear_input_bulk = True
             st.rerun()
         except Exception as e:
@@ -944,5 +1064,6 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
