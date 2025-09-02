@@ -814,7 +814,7 @@ def train_lstm_on_full_history(model, history, epochs=20, batch_size=64):
 
     X_seq, X_feat, y_num, y_color, y_dozen, y_neighbors, y_regions, y_eohl = data
 
-    with st.spinner(f"Treinando LSTM no histórico completo ({len(X_seq)} amostras, epochs={epochs}, batch_size={batch_size})..."):
+    with st.spinner(f"Treinando LSTM no histórico completo ({len(X_seq)} amostras)..."):
     try:
         epochs, batch_size = get_training_params(len(history))
         model.fit([X_seq, X_feat],
@@ -825,6 +825,7 @@ def train_lstm_on_full_history(model, history, epochs=20, batch_size=64):
         st.success(f"LSTM treinado com {len(X_seq)} amostras (epochs={epochs}, batch_size={batch_size}).")
     except Exception as e:
         st.error(f"Erro no treino em massa do LSTM: {e}")
+
 
 
 def preload_dqn_with_history(agent, history, model, top_k=3):
@@ -1064,6 +1065,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
