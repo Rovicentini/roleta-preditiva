@@ -313,6 +313,26 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
     last_dozen_one_hot = to_categorical(number_to_dozen(last_num), 4) if last_num in range(NUM_TOTAL) else np.zeros(4)
     
     recent_seq = seq_slice
+    # Frequência relativa dos últimos 100 números
+    freq_counter = np.zeros(NUM_TOTAL)
+    freq_window = sequence[-100:] if len(sequence) >= 100 else sequence
+    for num in freq_window:
+        freq_counter[num] += 1
+    freq_vector = freq_counter / max(1, np.sum(freq_counter))
+    # Tendência por cor (vermelho, preto, verde)
+    color_counts = [0, 0, 0]  # vermelho, preto, verde
+    for num in freq_window:
+        color = number_to_color(num)
+        if color in [0, 1, 2]:
+            color_counts[color] += 1
+    color_vector = np.array(color_counts) / max(1, len(freq_window))
+    region_counts_freq = np.zeros(3)
+    for num in freq_window:
+        dozen = number_to_dozen(num)
+        if dozen in [0, 1, 2]:  # ignorando 0
+             region_counts_freq[dozen] += 1
+    region_vector = region_counts_freq / max(1, np.sum(region_counts_freq))
+
     even_count = sum(1 for n in recent_seq if n % 2 == 0 and n != 0)
     odd_count = sum(1 for n in recent_seq if n % 2 != 0)
     high_count = sum(1 for n in recent_seq if n >= 19 and n <= 36)
@@ -369,7 +389,10 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
         last_region_one_hot,
         region_proportions,
         np.array([region_streak_norm]),
-        last_num_pulling_strength
+        last_num_pulling_strength,
+        freq_vector,
+        color_vector,
+        region_vector,
     ]).astype(np.float32)
 
     return state
@@ -649,7 +672,9 @@ class DQNAgent:
             return
         
         try:
-            q_next = self.target_model.predict(next_states, verbose=0)
+            next_q_target = self.model.predict(next_states, verbose=0)
+            next_actions = np.argmax(next_q_target, axis=1)
+            next_q_values = self.target_model.predict(next_states, verbose=0)
             q_curr = self.model.predict(states, verbose=0)
         except Exception:
             return
@@ -661,8 +686,7 @@ class DQNAgent:
                 if done:
                     target[action] = reward
                 else:
-                    next_q = q_next[i] if i < len(q_next) else np.zeros(self.action_size)
-                    target[action] = reward + self.gamma * np.max(next_q)
+                    target[action] = reward + self.gamma * next_q_values[i][next_actions[i]]
             X.append(state)
             Y.append(target)
         
@@ -1082,6 +1106,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
