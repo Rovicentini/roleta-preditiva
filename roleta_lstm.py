@@ -911,36 +911,36 @@ if st.button("Adicionar histórico"):
                 )
 
 # 3) Inicializa o DQN (se necessário)
-exemplo_estado = sequence_to_state(
-    st.session_state.history,
-    st.session_state.model,
-    st.session_state.feat_stats['means'],
-    st.session_state.feat_stats['stds']
-)
-if st.session_state.dqn_agent is None and exemplo_estado is not None:
-    st.session_state.dqn_agent = DQNAgent(state_size=exemplo_estado.shape[0], action_size=NUM_TOTAL)
+            exemplo_estado = sequence_to_state(
+                st.session_state.history,
+                st.session_state.model,
+                st.session_state.feat_stats['means'],
+                st.session_state.feat_stats['stds']
+            )
+            if st.session_state.dqn_agent is None and exemplo_estado is not None:
+                st.session_state.dqn_agent = DQNAgent(state_size=exemplo_estado.shape[0], action_size=NUM_TOTAL)
 
 # 4) Pré-carrega replay do DQN com pares (state, actions=LSTM_topk, reward, next_state)
-if st.session_state.dqn_agent is not None and st.session_state.model is not None:
-    preload_dqn_with_history(
-        st.session_state.dqn_agent,
-        st.session_state.history,
-        st.session_state.model,
-        top_k=3
-    )
+            if st.session_state.dqn_agent is not None and st.session_state.model is not None:
+                preload_dqn_with_history(
+                    st.session_state.dqn_agent,
+                    st.session_state.history,
+                    st.session_state.model,
+                    top_k=3
+                )
     # 5) Executa algumas iterações de treino em cima do replay carregado
-    with st.spinner("Executando treino inicial do DQN..."):
-        for _ in range(40):   # ajuste fino: 20–100
-            st.session_state.dqn_agent.replay(REPLAY_BATCH)
-        st.session_state.dqn_agent.update_target()
-    st.success("DQN pré-treinado com o histórico.")
+                with st.spinner("Executando treino inicial do DQN..."):
+                    for _ in range(40):   # ajuste fino: 20–100
+                        st.session_state.dqn_agent.replay(REPLAY_BATCH)
+                    st.session_state.dqn_agent.update_target()
+                st.success("DQN pré-treinado com o histórico.")
 # Opcional: Atualiza prev_state para próxima decisão já usar o modelo afinado
-st.session_state.prev_state = sequence_to_state(
-    st.session_state.history,
-    st.session_state.model,
-    st.session_state.feat_stats['means'],
-    st.session_state.feat_stats['stds']
-)
+            st.session_state.prev_state = sequence_to_state(
+                st.session_state.history,
+                st.session_state.model,
+                st.session_state.feat_stats['means'],
+                st.session_state.feat_stats['stds']
+            )
 
             st.session_state.clear_input_bulk = True
             st.rerun()
@@ -1066,6 +1066,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
