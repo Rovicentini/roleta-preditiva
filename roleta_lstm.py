@@ -458,7 +458,7 @@ def predict_next_numbers(model, history, top_k=3):
         logger.error(f"Erro na previsão LSTM: {e}")
         return []
 
-    temperature = 0.4
+    temperature = 0.25
     adjusted = np.log(num_probs + 1e-12) / temperature
     adjusted = np.exp(adjusted)
     adjusted /= adjusted.sum()
@@ -1066,6 +1066,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
