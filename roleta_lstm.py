@@ -1098,9 +1098,17 @@ if st.session_state.last_input is not None:
 
         # Inicializa DQN se ainda não existir
         if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
-    exemplo_estado = sequence_to_state(st.session_state.history, st.session_state.model)
-    if exemplo_estado is not None:
-        st.session_state.dqn_agent = DQNAgent(state_size=exemplo_estado.shape[0], action_size=NUM_TOTAL)
+            exemplo_estado = sequence_to_state(
+                st.session_state.history,
+                st.session_state.model,
+                st.session_state.feat_stats['means'],
+                st.session_state.feat_stats['stds']
+            )
+            if exemplo_estado is not None:
+                st.session_state.dqn_agent = DQNAgent(
+                    state_size=exemplo_estado.shape[0],
+                    action_size=NUM_TOTAL
+            )
 
 
         # Reforço com resultado anterior
@@ -1240,6 +1248,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
