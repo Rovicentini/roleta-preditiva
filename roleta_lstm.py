@@ -1077,21 +1077,25 @@ if st.session_state.last_input is not None:
             st.session_state.lstm_predictions = None
 
         st.session_state.history.append(num)
-        st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
+        st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(
+            st.session_state.co_occurrence_matrix,
+            st.session_state.history
+        )
+
+        # ✅ Avalia a previsão da rodada
         st.session_state.stats = avaliar_previsao(apostas_final, num, st.session_state.stats)
 
+    except Exception as e:
+        logger.error(f"Erro ao processar entrada: {e}")
 
- # Avalia a previsão da rodada
-st.session_state.stats = avaliar_previsao(apostas_final, num, st.session_state.stats)
+    # ✅ Exibe painel de métricas (fora do try, mas dentro do if)
+    st.markdown("### 📊 Métricas de Acurácia")
+    st.write(f"Total de rodadas: {st.session_state.stats['rodadas']}")
+    st.write(f"Total de acertos: {st.session_state.stats['acertos']}")
+    st.write(f"Top‑1: {st.session_state.stats['top1']} acertos")
+    st.write(f"Top‑3: {st.session_state.stats['top3']} acertos")
+    st.write(f"Top‑5: {st.session_state.stats['top5']} acertos")
 
-# Exibe painel de métricas
-st.markdown("### 📊 Métricas de Acurácia")
-st.write(f"Total de rodadas: {st.session_state.stats['rodadas']}")
-st.write(f"Total de acertos: {st.session_state.stats['acertos']}")
-st.write(f"Top‑1: {st.session_state.stats['top1']} acertos")
-st.write(f"Top‑3: {st.session_state.stats['top3']} acertos")
-st.write(f"Top‑5: {st.session_state.stats['top5']} acertos")
-       
         # Inicializa DQN se ainda não existir
         if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
             exemplo_estado = sequence_to_state(st.session_state.history, st.session_state.model)
@@ -1235,6 +1239,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
