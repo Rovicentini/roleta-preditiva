@@ -1083,12 +1083,10 @@ if st.session_state.last_input is not None:
         )
 
         # ✅ Avalia a previsão da rodada
-        st.session_state.stats = avaliar_previsao(apostas_final, num, st.session_state.stats)
+        try:
+    st.session_state.stats = avaliar_previsao(apostas_final, num, st.session_state.stats)
 
-    except Exception as e:
-        logger.error(f"Erro ao processar entrada: {e}")
-
-    # ✅ Exibe painel de métricas (fora do try, mas dentro do if)
+    # Exibe painel de métricas
     st.markdown("### 📊 Métricas de Acurácia")
     st.write(f"Total de rodadas: {st.session_state.stats['rodadas']}")
     st.write(f"Total de acertos: {st.session_state.stats['acertos']}")
@@ -1096,19 +1094,23 @@ if st.session_state.last_input is not None:
     st.write(f"Top‑3: {st.session_state.stats['top3']} acertos")
     st.write(f"Top‑5: {st.session_state.stats['top5']} acertos")
 
-        # Inicializa DQN se ainda não existir
-        if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
-            exemplo_estado = sequence_to_state(
-                st.session_state.history,
-                st.session_state.model,
-                st.session_state.feat_stats['means'],
-                st.session_state.feat_stats['stds']
-            )
-            if exemplo_estado is not None:
-                st.session_state.dqn_agent = DQNAgent(
-                    state_size=exemplo_estado.shape[0],
-                    action_size=NUM_TOTAL
-                )
+except Exception as e:
+    logger.error(f"Erro ao processar entrada: {e}")
+
+# Fora do try–except, alinhado corretamente
+if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
+    exemplo_estado = sequence_to_state(
+        st.session_state.history,
+        st.session_state.model,
+        st.session_state.feat_stats['means'],
+        st.session_state.feat_stats['stds']
+    )
+    if exemplo_estado is not None:
+        st.session_state.dqn_agent = DQNAgent(
+            state_size=exemplo_estado.shape[0],
+            action_size=NUM_TOTAL
+        )
+
 
 
         # Reforço com resultado anterior
@@ -1248,6 +1250,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
