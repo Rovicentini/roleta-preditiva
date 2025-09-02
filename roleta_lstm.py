@@ -17,6 +17,32 @@ from collections import Counter, deque
 import random
 import logging
 
+
+import json
+
+def log_dqn_step(episode, step, state, action, reward, q_values, epsilon, loss=None):
+    try:
+        log_entry = {
+            "episode": episode,
+            "step": step,
+            "action": action,
+            "reward": reward,
+            "epsilon": round(epsilon, 4),
+            "loss": float(loss) if loss is not None else None,
+            "q_values_top5": np.argsort(q_values)[-5:].tolist(),
+            "state_summary": {
+                "mean": float(np.mean(state)),
+                "std": float(np.std(state)),
+                "max": float(np.max(state)),
+                "min": float(np.min(state))
+            }
+        }
+        with open("dqn_log.jsonl", "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+    except Exception as e:
+        logger.error(f"Erro ao registrar log DQN: {e}")
+
+
 # =========================
 # Utils Streamlit
 # =========================
@@ -1031,6 +1057,21 @@ if st.session_state.last_input is not None:
             if st.session_state.dqn_agent is not None:
                 st.session_state.dqn_agent.remember(st.session_state.prev_state, st.session_state.prev_actions, recompensa, proximo_estado, False)
 
+            if st.session_state.dqn_agent is not None:
+                try:
+                    q_vals = st.session_state.dqn_agent.model.predict(np.array([st.session_state.prev_state]), verbose=0)[0]
+                    log_dqn_step(
+                        episode=1,  # ou use um contador se quiser
+                        step=st.session_state.step_count,
+                        state=st.session_state.prev_state,
+                    action=st.session_state.prev_actions,
+                    reward=recompensa,
+                    q_values=q_vals,
+                    epsilon=st.session_state.dqn_agent.epsilon
+        )
+    except Exception as e:
+        logger.error(f"Erro ao logar passo DQN: {e}")
+
             # Atualiza estatísticas
             st.session_state.stats['bets'] += 1
             st.session_state.stats['profit'] += recompensa
@@ -1106,6 +1147,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
