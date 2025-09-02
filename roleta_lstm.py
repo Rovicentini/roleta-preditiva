@@ -385,13 +385,23 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     x = BatchNormalization()(x)
     x = Dropout(0.3)(x)
 
+    # LSTM bidirecional
     x = Bidirectional(LSTM(96, return_sequences=True, kernel_regularizer=l2(1e-4)))(x)
     x = BatchNormalization()(x)
     x = Dropout(0.5)(x)
+
+# CNN para padrões locais
+    from tensorflow.keras.layers import Conv1D, GlobalMaxPooling1D
+    cnn_out = Conv1D(64, kernel_size=3, activation='relu', padding='same')(x)
+    cnn_out = GlobalMaxPooling1D()(cnn_out)
+
     
     x_att = Attention(name="self_attention")([x, x])
+    x_att = LSTM(64, return_sequences=False)(x_att)
 
-    x = LSTM(64, return_sequences=False)(x_att)
+# Combina CNN + LSTM final
+    x = Concatenate()([cnn_out, x_att])
+
     x = BatchNormalization()(x)
     x = Dropout(0.25)(x)
 
@@ -558,10 +568,16 @@ class DQNAgent:
 
     def _build_model(self):
         state_input = Input(shape=(self.state_size,))
-        x = Dense(256)(state_input)
+        x = Dense(512)(state_input)
         x = LeakyReLU(alpha=0.1)(x)
         x = BatchNormalization()(x)
         x = Dropout(0.3)(x)
+
+        x = Dense(256)(x)
+        x = LeakyReLU(alpha=0.1)(x)
+        x = BatchNormalization()(x)
+        x = Dropout(0.3)(x)
+
 
         value_stream = Dense(128)(x)
         value_stream = LeakyReLU(alpha=0.1)(value_stream)
@@ -1066,6 +1082,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
