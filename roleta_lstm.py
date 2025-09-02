@@ -1068,9 +1068,9 @@ if st.session_state.last_input is not None:
                     reward=recompensa,
                     q_values=q_vals,
                     epsilon=st.session_state.dqn_agent.epsilon
-        )
-    except Exception as e:
-        logger.error(f"Erro ao logar passo DQN: {e}")
+                    )
+                except Exception as e:
+                    logger.error(f"Erro ao logar passo DQN: {e}")
 
             # Atualiza estatísticas
             st.session_state.stats['bets'] += 1
@@ -1147,6 +1147,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
