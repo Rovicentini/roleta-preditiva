@@ -286,6 +286,7 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
     num_probs = np.zeros(NUM_TOTAL)
     color_probs = np.zeros(3)
     dozen_probs = np.zeros(4)
+    entropy_vector = np.array([0.0])  # Valor neutro se não for possível calcular
     if model is not None and len(sequence) >= SEQUENCE_LEN:
         try:
             seq_arr = np.expand_dims(one_hot_seq, axis=0)
@@ -1346,6 +1347,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
