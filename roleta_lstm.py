@@ -532,15 +532,37 @@ def calculate_neighbors_probs(history):
     return probs
 
 
+def calculate_regions_probs(history):
+    from collections import Counter
+
+    region_names = list(REGIONS.keys())
+    region_counts = [0] * len(region_names)
+    total = 0
+
+    for num in history:
+        region_idx = number_to_region(num)
+        if region_idx != -1:
+            region_counts[region_idx] += 1
+            total += 1
+
+    if total == 0:
+        return [0.0] * len(region_names)
+
+    return [count / total for count in region_counts]
+
+
 # --- PREDICTION POSTPROCESSING ---
 def predict_next_numbers(model, history, top_k=3):
     if len(history) > 0:
         neighbors_probs = calculate_neighbors_probs(history)
+        regions_probs = calculate_regions_probs(history)
     else:
-        neighbors_probs = [0.0] * len(WHEEL_ORDER)  # ou algum valor neutro
+        neighbors_probs = [0.0] * len(WHEEL_ORDER)
+        regions_probs = [0.0] * len(REGIONS)
 
     if history is None or len(history) < SEQUENCE_LEN or model is None:
         return []
+
     try:
         feat = np.array([get_advanced_features(history[-SEQUENCE_LEN:],
                                                 st.session_state.feat_stats['means'],
@@ -1299,6 +1321,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
