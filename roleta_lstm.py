@@ -1174,62 +1174,81 @@ if st.session_state.prev_state is not None and st.session_state.prev_actions is 
         except Exception as e:
             logger.error(f"Erro ao logar passo DQN: {e}")
 
+        # ✅ CORREÇÃO: Variáveis num_probs e freq_vector precisam ser definidas
+        # Obtenha as probabilidades atuais do LSTM
+        if st.session_state.model is not None:
+            try:
+                seq_slice = st.session_state.history[-SEQUENCE_LEN:] if st.session_state.history else []
+                feat = get_advanced_features(seq_slice, st.session_state.feat_stats['means'], st.session_state.feat_stats['stds'])
+                seq_one_hot = sequence_to_one_hot(seq_slice).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
+                raw = st.session_state.model.predict([seq_one_hot, np.array([feat])], verbose=0)
+                num_probs = np.array(raw[0][0]) if isinstance(raw, list) else np.array(raw)[0]
+                
+                # Calcule freq_vector
+                freq_counter = np.zeros(NUM_TOTAL)
+                freq_window = st.session_state.history[-100:] if len(st.session_state.history) >= 100 else st.session_state.history
+                for num_val in freq_window:
+                    freq_counter[num_val] += 1
+                freq_vector = freq_counter / max(1, np.sum(freq_counter))
+            except Exception:
+                num_probs = np.zeros(NUM_TOTAL)
+                freq_vector = np.zeros(NUM_TOTAL)
+        else:
+            num_probs = np.zeros(NUM_TOTAL)
+            freq_vector = np.zeros(NUM_TOTAL)
+
         # ✅ Aplicando filtro de apostas por confiança combinada
         apostas_final = filtrar_apostas_por_confianca(num_probs, q_vals, freq_vector)
 
-
-            # Atualiza estatísticas
-            st.session_state.stats['bets'] += 1
-            st.session_state.stats['profit'] += recompensa
-            if recompensa > 0:
-                st.session_state.stats['wins'] += 1
-                st.session_state.stats['streak'] += 1
-                st.session_state.stats['max_streak'] = max(st.session_state.stats['max_streak'], st.session_state.stats['streak'])
-            else:
-                st.session_state.stats['streak'] = 0
-
-            st.session_state.step_count += 1
-            if st.session_state.dqn_agent is not None:
-                st.session_state.dqn_agent.replay(REPLAY_BATCH)
-            if st.session_state.dqn_agent is not None and st.session_state.step_count % TARGET_UPDATE_FREQ == 0:
-                st.session_state.dqn_agent.update_target()
-
-        # Inicializa e treina LSTM se já houver dados suficientes
-        if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
-            st.session_state.model = build_deep_learning_model()
-        if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN * 2:
-            train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
-            st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model,
-                                                            st.session_state.feat_stats['means'],
-                                                            st.session_state.feat_stats['stds'])
-
-            pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
-            if pred_info and 'top_numbers' in pred_info:
-                st.session_state.lstm_predictions = pred_info['top_numbers']
-
-                st.subheader("🎯 Previsões LSTM")
-                for n, conf in pred_info['top_numbers']:
-                    st.write(f"Número: **{n}** — Probabilidade: {conf:.2%}")
-
-        # Define ações sugeridas
-        if USE_LSTM_ONLY and st.session_state.model is not None:
-            pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
-            acoes_sugeridas = [n for n, _ in pred_info['top_numbers']] if pred_info else random.sample(range(NUM_TOTAL), 3)
-        elif st.session_state.dqn_agent is not None and st.session_state.prev_state is not None:
-            possiveis_acoes = st.session_state.dqn_agent.act_top_k(st.session_state.prev_state, k=5, use_epsilon=True)
-            acoes_sugeridas = filter_actions_by_region(possiveis_acoes, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
+        # Atualiza estatísticas (CORRIGIDO: sem indentação extra)
+        st.session_state.stats['bets'] += 1
+        st.session_state.stats['profit'] += recompensa
+        if recompensa > 0:
+            st.session_state.stats['wins'] += 1
+            st.session_state.stats['streak'] += 1
+            st.session_state.stats['max_streak'] = max(st.session_state.stats['max_streak'], st.session_state.stats['streak'])
         else:
-            acoes_sugeridas = random.sample(range(NUM_TOTAL), 3)
+            st.session_state.stats['streak'] = 0
 
-        st.session_state.prev_actions = acoes_sugeridas
+        st.session_state.step_count += 1
+        if st.session_state.dqn_agent is not None:
+            st.session_state.dqn_agent.replay(REPLAY_BATCH)
+        if st.session_state.dqn_agent is not None and st.session_state.step_count % TARGET_UPDATE_FREQ == 0:
+            st.session_state.dqn_agent.update_target()
 
-        st.subheader("🤖 Ações sugeridas")
-        for acao in acoes_sugeridas:
-            vizinhos = optimal_neighbors(acao, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
-            st.write(f"- Apostar no {acao} (vizinhos: {', '.join(map(str, vizinhos))})")
+# Inicializa e treina LSTM se já houver dados suficientes (CORRIGIDO: fora do bloco anterior)
+if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
+    st.session_state.model = build_deep_learning_model()
+if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN * 2:
+    train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
+    st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model,
+                                                    st.session_state.feat_stats['means'],
+                                                    st.session_state.feat_stats['stds'])
 
-    except Exception as e:
-        st.error(f"Erro inesperado: {e}")
+    pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
+    if pred_info and 'top_numbers' in pred_info:
+        st.session_state.lstm_predictions = pred_info['top_numbers']
+
+        st.subheader("🎯 Previsões LSTM")
+        for n, conf in pred_info['top_numbers']:
+            st.write(f"Número: **{n}** — Probabilidade: {conf:.2%}")
+
+# Define ações sugeridas (CORRIGIDO: fora do bloco anterior)
+if USE_LSTM_ONLY and st.session_state.model is not None:
+    pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
+    acoes_sugeridas = [n for n, _ in pred_info['top_numbers']] if pred_info else random.sample(range(NUM_TOTAL), 3)
+elif st.session_state.dqn_agent is not None and st.session_state.prev_state is not None:
+    possiveis_acoes = st.session_state.dqn_agent.act_top_k(st.session_state.prev_state, k=5, use_epsilon=True)
+    acoes_sugeridas = filter_actions_by_region(possiveis_acoes, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
+else:
+    acoes_sugeridas = random.sample(range(NUM_TOTAL), 3)
+
+st.session_state.prev_actions = acoes_sugeridas
+
+st.subheader("🤖 Ações sugeridas")
+for acao in acoes_sugeridas:
+    vizinhos = optimal_neighbors(acao, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
+    st.write(f"- Apostar no {acao} (vizinhos: {', '.join(map(str, vizinhos))})")
 
 st.markdown("---")
 st.subheader("📊 Estatísticas")
@@ -1253,6 +1272,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
