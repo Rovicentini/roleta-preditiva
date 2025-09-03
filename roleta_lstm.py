@@ -1082,31 +1082,6 @@ if st.session_state.last_input is not None:
             st.session_state.history
         )
 
-        
-        # ✅ Avalia a previsão da rodada
-if st.session_state.last_input is not None:
-    try:
-        num = int(st.session_state.last_input)
-
-        # Checa acurácia das previsões anteriores (Top-N)
-        if 'lstm_predictions' in st.session_state and st.session_state.lstm_predictions:
-            acuracias = calculate_top_n_accuracy(
-                st.session_state.lstm_predictions,
-                num,
-                top_n_values=[1, 3, 5]
-            )
-            for metrica, acertou in acuracias.items():
-                st.session_state.top_n_metrics[metrica]['total'] += 1
-                if acertou:
-                    st.session_state.top_n_metrics[metrica]['hits'] += 1
-            st.session_state.lstm_predictions = None
-
-        st.session_state.history.append(num)
-        st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(
-            st.session_state.co_occurrence_matrix,
-            st.session_state.history
-        )
-
         # ✅ CORREÇÃO: Define apostas_final antes de usar
         apostas_final = st.session_state.prev_actions if st.session_state.prev_actions else []
         
@@ -1278,6 +1253,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
