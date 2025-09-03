@@ -515,6 +515,11 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
 
 # --- PREDICTION POSTPROCESSING ---
 def predict_next_numbers(model, history, top_k=3):
+    if len(history) > 0:
+        neighbors_probs = calculate_neighbors_probs(history)
+    else:
+        neighbors_probs = [0.0] * len(WHEEL_ORDER)  # ou algum valor neutro
+
     if history is None or len(history) < SEQUENCE_LEN or model is None:
         return []
     try:
@@ -1275,6 +1280,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
