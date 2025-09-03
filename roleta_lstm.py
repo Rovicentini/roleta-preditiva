@@ -553,7 +553,7 @@ def calculate_regions_probs(history):
 
 # --- PREDICTION POSTPROCESSING ---
 def predict_next_numbers(model, history, top_k=3):
-   if history is None or len(history) < SEQUENCE_LEN or model is None:
+    if history is None or len(history) < SEQUENCE_LEN or model is None:
         return []
 
     if len(history) > 0:
@@ -564,7 +564,6 @@ def predict_next_numbers(model, history, top_k=3):
         neighbors_probs = [0.0] * len(WHEEL_ORDER)
         regions_probs = [0.0] * len(REGIONS)
         eohl_probs = [0.0] * 4  # 👈 aqui você define o tamanho esperado (par, ímpar, alto, baixo)
-
 
     try:
         feat = np.array([get_advanced_features(history[-SEQUENCE_LEN:],
@@ -589,7 +588,6 @@ def predict_next_numbers(model, history, top_k=3):
     except Exception as e:
         logger.error(f"Erro na previsão LSTM: {e}")
         return []
-
 
     temperature = 0.25
     adjusted = np.log(num_probs + 1e-12) / temperature
@@ -651,7 +649,6 @@ def predict_next_numbers(model, history, top_k=3):
         'color_pred': color_pred,
         'dozen_pred': dozen_pred
     }
-
 def calculate_top_n_accuracy(predictions, actual_number, top_n_values=[1, 3, 5]):
     """
     Calcula a Top-N Accuracy com base nas previsões e no número sorteado.
@@ -1324,6 +1321,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
