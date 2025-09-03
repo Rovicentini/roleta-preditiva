@@ -512,6 +512,25 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
                   metrics={'num_out': 'accuracy'})
 
     return model
+# Função para calcular probabilidades dos vizinhos na roleta
+def calculate_neighbors_probs(history):
+    from collections import Counter
+
+    count = Counter(history)
+    total = sum(count.values())
+
+    probs = [0.0] * len(WHEEL_ORDER)
+
+    for i, num in enumerate(WHEEL_ORDER):
+        prev_idx = (i - 1) % len(WHEEL_ORDER)
+        next_idx = (i + 1) % len(WHEEL_ORDER)
+        neighbors = [WHEEL_ORDER[prev_idx], WHEEL_ORDER[next_idx]]
+
+        neighbor_count = sum(count[n] for n in neighbors)
+        probs[i] = neighbor_count / total if total > 0 else 0.0
+
+    return probs
+
 
 # --- PREDICTION POSTPROCESSING ---
 def predict_next_numbers(model, history, top_k=3):
@@ -1280,6 +1299,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
