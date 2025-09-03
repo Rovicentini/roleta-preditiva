@@ -1082,8 +1082,9 @@ if st.session_state.last_input is not None:
             st.session_state.history
         )
 
+        
         # ✅ Avalia a previsão da rodada
-        if st.session_state.last_input is not None:
+if st.session_state.last_input is not None:
     try:
         num = int(st.session_state.last_input)
 
@@ -1119,6 +1120,7 @@ if st.session_state.last_input is not None:
 
     except Exception as e:
         logger.error(f"Erro ao processar entrada: {e}")
+
 
 # Inicializa DQN se ainda não existir
 if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
@@ -1274,6 +1276,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
