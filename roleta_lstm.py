@@ -14,7 +14,6 @@ from tensorflow.keras.layers import Bidirectional
 from tensorflow.keras.layers import Lambda
 from tensorflow.keras import backend as K
 from collections import Counter, deque
-from utils import calculate_eohl_probs
 import random
 import logging
 
@@ -1347,6 +1346,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
