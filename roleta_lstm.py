@@ -148,7 +148,7 @@ def get_training_params(history_length):
 
 EPSILON_START = 1.0
 EPSILON_MIN = 0.05
-EPSILON_DECAY = 0.97
+EPSILON_DECAY = 0.995
 # Limiar de confiança para sugerir aposta
 CONFIDENCE_THRESHOLD = 0.1
 
@@ -899,6 +899,7 @@ def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
 
 
 
+
 # =========================
 # LSTM: construção de dataset e treino recente
 # =========================
@@ -1028,25 +1029,26 @@ def preload_dqn_with_history(agent, history, model, top_k=3):
                                       st.session_state.feat_stats['means'],
                                       st.session_state.feat_stats['stds'])
             # Previsões do LSTM para esse estado
-            pred = predict_next_numbers(model, past, top_k=top_k)
-            if pred and 'top_numbers' in pred and pred['top_numbers']:
-                actions = [n for n, _ in pred['top_numbers']]
-            else:
-                actions = [random.randrange(NUM_TOTAL)]
+            # Ações geradas pelo DQN com exploração
+            actions = agent.act_top_k(state, k=top_k, use_epsilon=True)
 
+            
             # Próximo estado e outcome observado
             next_state = sequence_to_state(history[:i+1], model,
                                            st.session_state.feat_stats['means'],
                                            st.session_state.feat_stats['stds'])
             outcome = history[i]
-            reward = compute_reward(actions, outcome,
-                                    bet_amount=BET_AMOUNT,
-                                    max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD)
+            reward, acertos_exatos, acertos_vizinhos = compute_reward(
+                actions,
+                outcome,
+                bet_amount=BET_AMOUNT,
+                max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD
+            )
+
+            logger.info(f"[PRELOAD] Recompensa: {reward} | Exatos: {acertos_exatos} | Vizinhos: {acertos_vizinhos}")
 
             agent.remember(state, actions, reward, next_state, False)
-            count += 1
 
-    st.success(f"Replay do DQN pré-carregado com {count} transições.")
 
 
 # --- UI ---
@@ -1214,6 +1216,7 @@ if st.session_state.prev_state is not None and st.session_state.prev_actions is 
         bet_amount=BET_AMOUNT,
         max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD
     )
+    logger.info(f"Número sorteado: {num} | Apostas feitas: {st.session_state.prev_actions} | Acerto direto: {num in st.session_state.prev_actions}")
 
     logger.info(f"Recompensa: {recompensa} | Exatos: {acertos_exatos} | Vizinhos: {acertos_vizinhos}")
 
@@ -1354,6 +1357,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
