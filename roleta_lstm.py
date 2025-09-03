@@ -14,6 +14,7 @@ from tensorflow.keras.layers import Bidirectional
 from tensorflow.keras.layers import Lambda
 from tensorflow.keras import backend as K
 from collections import Counter, deque
+from utils import calculate_eohl_probs
 import random
 import logging
 
@@ -549,6 +550,31 @@ def calculate_regions_probs(history):
         return [0.0] * len(region_names)
 
     return [count / total for count in region_counts]
+
+
+def calculate_eohl_probs(history):
+    """
+    Calcula probabilidades para:
+    [0] números pares
+    [1] números ímpares
+    [2] números altos (19–36)
+    [3] números baixos (1–18)
+    """
+    if not history:
+        return [0.0] * 4
+
+    total = len(history)
+    even = sum(1 for n in history if n % 2 == 0 and n != 0)
+    odd = sum(1 for n in history if n % 2 != 0)
+    high = sum(1 for n in history if 19 <= n <= 36)
+    low = sum(1 for n in history if 1 <= n <= 18)
+
+    return [
+        even / total,
+        odd / total,
+        high / total,
+        low / total
+    ]
 
 
 # --- PREDICTION POSTPROCESSING ---
@@ -1321,6 +1347,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
