@@ -553,15 +553,18 @@ def calculate_regions_probs(history):
 
 # --- PREDICTION POSTPROCESSING ---
 def predict_next_numbers(model, history, top_k=3):
+   if history is None or len(history) < SEQUENCE_LEN or model is None:
+        return []
+
     if len(history) > 0:
         neighbors_probs = calculate_neighbors_probs(history)
         regions_probs = calculate_regions_probs(history)
+        eohl_probs = calculate_eohl_probs(history)
     else:
         neighbors_probs = [0.0] * len(WHEEL_ORDER)
         regions_probs = [0.0] * len(REGIONS)
+        eohl_probs = [0.0] * 4  # 👈 aqui você define o tamanho esperado (par, ímpar, alto, baixo)
 
-    if history is None or len(history) < SEQUENCE_LEN or model is None:
-        return []
 
     try:
         feat = np.array([get_advanced_features(history[-SEQUENCE_LEN:],
@@ -1321,6 +1324,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
