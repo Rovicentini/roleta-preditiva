@@ -861,28 +861,31 @@ def filter_actions_by_region(actions, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD):
 def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
                    max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD):
     action_numbers = set([a for a in action_numbers if 0 <= a <= 36])
-    acertos_exatos = 1 if outcome_number in action_numbers else 0
+
+    # Acertos exatos
+    acertos_exatos = [a for a in action_numbers if a == outcome_number]
+
+    # Acertos vizinhos
+    acertos_vizinhos = []
+    for a in action_numbers:
+        vizinhos = optimal_neighbors(a, max_neighbors=max_neighbors_for_reward)
+        if outcome_number in vizinhos:
+            acertos_vizinhos.append(a)
 
     # Penalidade por quantidade de apostas
     bet_penalty = 0.1 * len(action_numbers)
 
-    # Acerto vizinho
-    all_neighbors = set()
-    for a in action_numbers:
-        all_neighbors.update(optimal_neighbors(a, max_neighbors=max_neighbors_for_reward))
-    acerto_vizinho = 1 if outcome_number in all_neighbors else 0
-
     # Recompensa proporcional
     reward = 0.0
-    reward += acertos_exatos * REWARD_EXACT
-    reward += acerto_vizinho * REWARD_NEIGHBOR
+    reward += len(acertos_exatos) * REWARD_EXACT
+    reward += len(acertos_vizinhos) * REWARD_NEIGHBOR
 
     # Penalidade por apostas amplas
     if len(action_numbers) > 10:
         reward -= 1.0
 
     # Bônus por múltiplos acertos
-    if acertos_exatos + acerto_vizinho >= 3:
+    if len(acertos_exatos) + len(acertos_vizinhos) >= 3:
         reward += 2.0
 
     # Bônus por streak
@@ -892,7 +895,8 @@ def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
     # Penalidade proporcional ao número de apostas
     reward -= bet_penalty
 
-    return reward * bet_amount
+    return reward * bet_amount, acertos_exatos, acertos_vizinhos
+
 
 
 # =========================
@@ -1204,12 +1208,15 @@ if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUE
 
 # Reforço com resultado anterior
 if st.session_state.prev_state is not None and st.session_state.prev_actions is not None:
-    recompensa = compute_reward(
+    recompensa, acertos_exatos, acertos_vizinhos = compute_reward(
         st.session_state.prev_actions,
         num,
         bet_amount=BET_AMOUNT,
         max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD
     )
+
+    logger.info(f"Recompensa: {recompensa} | Exatos: {acertos_exatos} | Vizinhos: {acertos_vizinhos}")
+
 
     proximo_estado = sequence_to_state(
         st.session_state.history,
@@ -1303,7 +1310,7 @@ if st.session_state.model is not None and len(st.session_state.history) > SEQUEN
     pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
     if pred_info and 'top_numbers' in pred_info:
         st.session_state.lstm_predictions = pred_info['top_numbers']
-
+        st.session_state.prev_actions = [n for n, _ in pred_info['top_numbers']]
         st.subheader("🎯 Previsões LSTM")
         for n, conf in pred_info['top_numbers']:
             st.write(f"Número: **{n}** — Probabilidade: {conf:.2%}")
@@ -1347,6 +1354,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
