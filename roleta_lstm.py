@@ -1107,6 +1107,9 @@ if st.session_state.last_input is not None:
             st.session_state.history
         )
 
+        # ✅ CORREÇÃO: Define apostas_final antes de usar
+        apostas_final = st.session_state.prev_actions if st.session_state.prev_actions else []
+        
         # Avalia a previsão da rodada
         st.session_state.stats = avaliar_previsao(apostas_final, num, st.session_state.stats)
 
@@ -1120,7 +1123,6 @@ if st.session_state.last_input is not None:
 
     except Exception as e:
         logger.error(f"Erro ao processar entrada: {e}")
-
 
 # Inicializa DQN se ainda não existir
 if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
@@ -1276,6 +1278,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
