@@ -1117,7 +1117,7 @@ if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUE
 
 
         # Reforço com resultado anterior
-        if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
+if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
     exemplo_estado = sequence_to_state(
         st.session_state.history,
         st.session_state.model,
@@ -1275,6 +1275,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
