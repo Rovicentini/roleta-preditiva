@@ -1174,33 +1174,32 @@ if st.session_state.prev_state is not None and st.session_state.prev_actions is 
         except Exception as e:
             logger.error(f"Erro ao logar passo DQN: {e}")
 
-        # ✅ CORREÇÃO: Variáveis num_probs e freq_vector precisam ser definidas
-        # Obtenha as probabilidades atuais do LSTM
-        if st.session_state.model is not None:
+        # ✅ Obtenha as probabilidades atuais do LSTM
+        num_probs = np.zeros(NUM_TOTAL)
+        freq_vector = np.zeros(NUM_TOTAL)
+        
+        if st.session_state.model is not None and len(st.session_state.history) >= SEQUENCE_LEN:
             try:
                 seq_slice = st.session_state.history[-SEQUENCE_LEN:] if st.session_state.history else []
                 feat = get_advanced_features(seq_slice, st.session_state.feat_stats['means'], st.session_state.feat_stats['stds'])
                 seq_one_hot = sequence_to_one_hot(seq_slice).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
                 raw = st.session_state.model.predict([seq_one_hot, np.array([feat])], verbose=0)
-                num_probs = np.array(raw[0][0]) if isinstance(raw, list) else np.array(raw)[0]
+                num_probs = np.array(raw[0][0]) if isinstance(raw, list) and len(raw) > 0 else np.array(raw)[0]
                 
                 # Calcule freq_vector
                 freq_counter = np.zeros(NUM_TOTAL)
                 freq_window = st.session_state.history[-100:] if len(st.session_state.history) >= 100 else st.session_state.history
                 for num_val in freq_window:
-                    freq_counter[num_val] += 1
+                    if 0 <= num_val < NUM_TOTAL:
+                        freq_counter[num_val] += 1
                 freq_vector = freq_counter / max(1, np.sum(freq_counter))
-            except Exception:
-                num_probs = np.zeros(NUM_TOTAL)
-                freq_vector = np.zeros(NUM_TOTAL)
-        else:
-            num_probs = np.zeros(NUM_TOTAL)
-            freq_vector = np.zeros(NUM_TOTAL)
+            except Exception as e:
+                logger.error(f"Erro ao obter probabilidades LSTM: {e}")
 
         # ✅ Aplicando filtro de apostas por confiança combinada
         apostas_final = filtrar_apostas_por_confianca(num_probs, q_vals, freq_vector)
 
-        # Atualiza estatísticas (CORRIGIDO: sem indentação extra)
+        # Atualiza estatísticas
         st.session_state.stats['bets'] += 1
         st.session_state.stats['profit'] += recompensa
         if recompensa > 0:
@@ -1216,14 +1215,18 @@ if st.session_state.prev_state is not None and st.session_state.prev_actions is 
         if st.session_state.dqn_agent is not None and st.session_state.step_count % TARGET_UPDATE_FREQ == 0:
             st.session_state.dqn_agent.update_target()
 
-# Inicializa e treina LSTM se já houver dados suficientes (CORRIGIDO: fora do bloco anterior)
+# Inicializa e treina LSTM se já houver dados suficientes
 if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
     st.session_state.model = build_deep_learning_model()
+    
 if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN * 2:
     train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
-    st.session_state.prev_state = sequence_to_state(st.session_state.history, st.session_state.model,
-                                                    st.session_state.feat_stats['means'],
-                                                    st.session_state.feat_stats['stds'])
+    st.session_state.prev_state = sequence_to_state(
+        st.session_state.history, 
+        st.session_state.model,
+        st.session_state.feat_stats['means'],
+        st.session_state.feat_stats['stds']
+    )
 
     pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
     if pred_info and 'top_numbers' in pred_info:
@@ -1233,7 +1236,7 @@ if st.session_state.model is not None and len(st.session_state.history) > SEQUEN
         for n, conf in pred_info['top_numbers']:
             st.write(f"Número: **{n}** — Probabilidade: {conf:.2%}")
 
-# Define ações sugeridas (CORRIGIDO: fora do bloco anterior)
+# Define ações sugeridas
 if USE_LSTM_ONLY and st.session_state.model is not None:
     pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
     acoes_sugeridas = [n for n, _ in pred_info['top_numbers']] if pred_info else random.sample(range(NUM_TOTAL), 3)
@@ -1272,6 +1275,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
