@@ -1118,73 +1118,33 @@ if st.button("Adicionar histórico"):
                 st.session_state.history.append(new_nums[i])
                 st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
             
-            # === TODO O CÓDIGO DE PRÉ-TREINO OFFLINE VEM AQUI DENTRO ===
-            # 1) Garante que o modelo exista
+            st.success(f"✅ Adicionados {len(new_nums)} números ao histórico.")
+            
+            # ⚠️ REMOVA O PRÉ-TREINO PESADO POR ENQUANTO - está travando a interface
+            # Apenas inicializações básicas:
             if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
                 st.session_state.model = build_deep_learning_model()
-
-            # 2) Treina o LSTM em TODO o histórico (batch offline)
-            if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN * 2:
-                train_lstm_on_full_history(
-                    st.session_state.model,
-                    st.session_state.history
-                )
-
-            # 3) Inicializa o DQN (se necessário)
-            exemplo_estado = sequence_to_state(
-                st.session_state.history,
-                st.session_state.model,
-                st.session_state.feat_stats['means'],
-                st.session_state.feat_stats['stds']
-            )
-            if st.session_state.dqn_agent is None and exemplo_estado is not None:
-                st.session_state.dqn_agent = DQNAgent(state_size=exemplo_estado.shape[0], action_size=NUM_TOTAL)
-
-            # 4) Pré-carrega replay do DQN
-            if st.session_state.dqn_agent is not None and st.session_state.model is not None:
-                preload_dqn_with_history(
-                    st.session_state.dqn_agent,
+                st.info("Modelo LSTM inicializado!")
+            
+            if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
+                exemplo_estado = sequence_to_state(
                     st.session_state.history,
                     st.session_state.model,
-                    top_k=3
+                    st.session_state.feat_stats['means'],
+                    st.session_state.feat_stats['stds']
                 )
-                
-                # 5) ✅ TREINO OFFLINE INTENSIVO
-                with st.spinner(f"Treinando DQN com {len(st.session_state.dqn_agent.memory)} exemplos..."):
-                    for epoch in range(5):
-                        total_loss = 0
-                        for _ in range(100):
-                            loss = st.session_state.dqn_agent.replay(REPLAY_BATCH)
-                            if loss:
-                                total_loss += loss
-                        
-                        st.session_state.dqn_agent.epsilon = max(
-                            EPSILON_MIN, 
-                            st.session_state.dqn_agent.epsilon * 0.7
-                        )
-                        
-                        logger.info(f"Época {epoch+1} - Loss médio: {total_loss/100 if total_loss > 0 else 0:.4f}")
-                    
-                    st.session_state.dqn_agent.update_target()
-                    st.session_state.dqn_agent.epsilon = EPSILON_MIN
-                    
-                st.success(f"DQN pré-treinado com {len(st.session_state.dqn_agent.memory)} exemplos. Epsilon: {st.session_state.dqn_agent.epsilon:.3f}")
-
-            # Opcional: Atualiza prev_state
-            st.session_state.prev_state = sequence_to_state(
-                st.session_state.history,
-                st.session_state.model,
-                st.session_state.feat_stats['means'],
-                st.session_state.feat_stats['stds']
-            )
-            st.success(f"✅ Adicionados {len(new_nums)} números e DQN treinado com {len(st.session_state.dqn_agent.memory)} exemplos!")
-            st.session_state.clear_input_bulk = True
-          
+                if exemplo_estado is not None:
+                    st.session_state.dqn_agent = DQNAgent(state_size=exemplo_estado.shape[0], action_size=NUM_TOTAL)
+                    st.info("Agente DQN inicializado!")
             
-        except Exception as e:  # ← AQUI TERMINA O try
+            st.session_state.clear_input_bulk = True
+            # NÃO use st.rerun() - isso limpa a interface
+            
+        except Exception as e:
             st.error(f"Erro ao processar números: {e}")
-    else:  # ← else do if st.session_state.input_bulk
+    else:
         st.warning("Insira números válidos para adicionar.")
+
 st.markdown("---")
 
 # Formulário para entrada de um único número (último resultado)
@@ -1264,7 +1224,6 @@ if st.session_state.prev_state is not None and st.session_state.prev_actions is 
         max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD
     )
     logger.info(f"Número sorteado: {num} | Apostas feitas: {st.session_state.prev_actions} | Acerto direto: {num in st.session_state.prev_actions}")
-    logger.info(f"Recompensa: {recompensa} | Exatos: {acertos_exatos} | Vizinhos: {acertos_vizinhos}")
 
     proximo_estado = sequence_to_state(
         st.session_state.history,
@@ -1280,74 +1239,6 @@ if st.session_state.prev_state is not None and st.session_state.prev_actions is 
             recompensa,
             proximo_estado,
             False
-        )
-
-    if st.session_state.dqn_agent is not None:
-        try:
-            q_vals = st.session_state.dqn_agent.model.predict(
-                np.array([st.session_state.prev_state]),
-                verbose=0
-            )[0]
-
-            log_dqn_step(
-                episode=1,
-                step=st.session_state.step_count,
-                state=st.session_state.prev_state,
-                action=st.session_state.prev_actions,
-                reward=recompensa,
-                q_values=q_vals,
-                epsilon=st.session_state.dqn_agent.epsilon
-            )
-        except Exception as e:
-            logger.error(f"Erro ao logar passo DQN: {e}")
-
-        # ✅ Obtenha as probabilidades atuais do LSTM
-        num_probs = np.zeros(NUM_TOTAL)
-        neighbors_probs = np.zeros(NUM_TOTAL)
-        regions_probs = np.zeros(len(REGIONS))
-        freq_vector = np.zeros(NUM_TOTAL)
-
-        if st.session_state.model is not None and len(st.session_state.history) >= SEQUENCE_LEN:
-            try:
-                seq_slice = st.session_state.history[-SEQUENCE_LEN:] if st.session_state.history else []
-                feat = get_advanced_features(seq_slice, st.session_state.feat_stats['means'], st.session_state.feat_stats['stds'])
-                seq_one_hot = sequence_to_one_hot(seq_slice).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
-                raw = st.session_state.model.predict([seq_one_hot, np.array([feat])], verbose=0)
-                
-                # Extrai todas as probabilidades
-                if isinstance(raw, list) and len(raw) >= 6:
-                    num_probs = np.array(raw[0][0])
-                    neighbors_probs = np.array(raw[3][0])
-                    regions_probs = np.array(raw[4][0])
-                
-                # Calcule freq_vector
-                freq_counter = np.zeros(NUM_TOTAL)
-                freq_window = st.session_state.history[-100:] if len(st.session_state.history) >= 100 else st.session_state.history
-                for num_val in freq_window:
-                    if 0 <= num_val < NUM_TOTAL:
-                        freq_counter[num_val] += 1
-                freq_vector = freq_counter / max(1, np.sum(freq_counter))
-            except Exception as e:
-                logger.error(f"Erro ao obter probabilidades LSTM: {e}")
-
-        # ✅ Obter q_vals para a filtragem
-        if st.session_state.dqn_agent is not None and st.session_state.prev_state is not None:
-            try:
-                q_vals_filter = st.session_state.dqn_agent.model.predict(
-                    np.array([st.session_state.prev_state]), verbose=0
-                )[0]
-            except:
-                q_vals_filter = np.zeros(NUM_TOTAL)
-        else:
-            q_vals_filter = np.zeros(NUM_TOTAL)
-
-        # ✅ Aplicando filtro de apostas por confiança combinada (versão avançada)
-        apostas_final = filtrar_apostas_por_confianca(
-            num_probs, 
-            q_vals_filter,
-            freq_vector,
-            neighbors_probs,
-            regions_probs
         )
 
 # Atualiza estatísticas
@@ -1464,22 +1355,6 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
