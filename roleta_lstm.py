@@ -1177,7 +1177,7 @@ if st.button("Adicionar histórico"):
                 st.session_state.feat_stats['means'],
                 st.session_state.feat_stats['stds']
             )
-
+            st.success(f"✅ Adicionados {len(new_nums)} números e DQN treinado com {len(st.session_state.dqn_agent.memory)} exemplos!")
             st.session_state.clear_input_bulk = True
           
             
@@ -1464,6 +1464,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
