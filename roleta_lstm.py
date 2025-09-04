@@ -1250,6 +1250,10 @@ if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUE
         )
 
 # Reforço com resultado anterior
+recompensa = 0.0  # ← Inicializa a variável
+acertos_exatos = []
+acertos_vizinhos = []
+
 if st.session_state.prev_state is not None and st.session_state.prev_actions is not None:
     recompensa, acertos_exatos, acertos_vizinhos = compute_reward(
         st.session_state.prev_actions,
@@ -1299,53 +1303,53 @@ if st.session_state.prev_state is not None and st.session_state.prev_actions is 
             logger.error(f"Erro ao logar passo DQN: {e}")
 
         # ✅ Obtenha as probabilidades atuais do LSTM
-num_probs = np.zeros(NUM_TOTAL)
-neighbors_probs = np.zeros(NUM_TOTAL)
-regions_probs = np.zeros(len(REGIONS))
-freq_vector = np.zeros(NUM_TOTAL)
+        num_probs = np.zeros(NUM_TOTAL)
+        neighbors_probs = np.zeros(NUM_TOTAL)
+        regions_probs = np.zeros(len(REGIONS))
+        freq_vector = np.zeros(NUM_TOTAL)
 
-if st.session_state.model is not None and len(st.session_state.history) >= SEQUENCE_LEN:
-    try:
-        seq_slice = st.session_state.history[-SEQUENCE_LEN:] if st.session_state.history else []
-        feat = get_advanced_features(seq_slice, st.session_state.feat_stats['means'], st.session_state.feat_stats['stds'])
-        seq_one_hot = sequence_to_one_hot(seq_slice).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
-        raw = st.session_state.model.predict([seq_one_hot, np.array([feat])], verbose=0)
-        
-        # Extrai todas as probabilidades
-        if isinstance(raw, list) and len(raw) >= 6:
-            num_probs = np.array(raw[0][0])
-            neighbors_probs = np.array(raw[3][0])
-            regions_probs = np.array(raw[4][0])
-        
-        # Calcule freq_vector
-        freq_counter = np.zeros(NUM_TOTAL)
-        freq_window = st.session_state.history[-100:] if len(st.session_state.history) >= 100 else st.session_state.history
-        for num_val in freq_window:
-            if 0 <= num_val < NUM_TOTAL:
-                freq_counter[num_val] += 1
-        freq_vector = freq_counter / max(1, np.sum(freq_counter))
-    except Exception as e:
-        logger.error(f"Erro ao obter probabilidades LSTM: {e}")
+        if st.session_state.model is not None and len(st.session_state.history) >= SEQUENCE_LEN:
+            try:
+                seq_slice = st.session_state.history[-SEQUENCE_LEN:] if st.session_state.history else []
+                feat = get_advanced_features(seq_slice, st.session_state.feat_stats['means'], st.session_state.feat_stats['stds'])
+                seq_one_hot = sequence_to_one_hot(seq_slice).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
+                raw = st.session_state.model.predict([seq_one_hot, np.array([feat])], verbose=0)
+                
+                # Extrai todas as probabilidades
+                if isinstance(raw, list) and len(raw) >= 6:
+                    num_probs = np.array(raw[0][0])
+                    neighbors_probs = np.array(raw[3][0])
+                    regions_probs = np.array(raw[4][0])
+                
+                # Calcule freq_vector
+                freq_counter = np.zeros(NUM_TOTAL)
+                freq_window = st.session_state.history[-100:] if len(st.session_state.history) >= 100 else st.session_state.history
+                for num_val in freq_window:
+                    if 0 <= num_val < NUM_TOTAL:
+                        freq_counter[num_val] += 1
+                freq_vector = freq_counter / max(1, np.sum(freq_counter))
+            except Exception as e:
+                logger.error(f"Erro ao obter probabilidades LSTM: {e}")
 
-# ✅ Obter q_vals para a filtragem
-if st.session_state.dqn_agent is not None and st.session_state.prev_state is not None:
-    try:
-        q_vals_filter = st.session_state.dqn_agent.model.predict(
-            np.array([st.session_state.prev_state]), verbose=0
-        )[0]
-    except:
-        q_vals_filter = np.zeros(NUM_TOTAL)
-else:
-    q_vals_filter = np.zeros(NUM_TOTAL)
+        # ✅ Obter q_vals para a filtragem
+        if st.session_state.dqn_agent is not None and st.session_state.prev_state is not None:
+            try:
+                q_vals_filter = st.session_state.dqn_agent.model.predict(
+                    np.array([st.session_state.prev_state]), verbose=0
+                )[0]
+            except:
+                q_vals_filter = np.zeros(NUM_TOTAL)
+        else:
+            q_vals_filter = np.zeros(NUM_TOTAL)
 
-# ✅ Aplicando filtro de apostas por confiança combinada (versão avançada)
-apostas_final = filtrar_apostas_por_confianca(
-    num_probs, 
-    q_vals_filter,  # ← Usando a variável correta
-    freq_vector,
-    neighbors_probs,
-    regions_probs
-)
+        # ✅ Aplicando filtro de apostas por confiança combinada (versão avançada)
+        apostas_final = filtrar_apostas_por_confianca(
+            num_probs, 
+            q_vals_filter,
+            freq_vector,
+            neighbors_probs,
+            regions_probs
+        )
 
 # Atualiza estatísticas
 st.session_state.stats['bets'] += 1
@@ -1461,6 +1465,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
