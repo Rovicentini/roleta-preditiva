@@ -856,19 +856,12 @@ class DQNAgent:
     
     try:
         history = self.model.fit(np.array(X), np.array(Y), epochs=1, verbose=0)
-        return history.history['loss'][0]  # ← RETORNA O LOSS
+        return history.history['loss'][0]
     except Exception:
-        return None  # ← RETORNA None EM CASO DE ERRO
+        return None
         
     if self.epsilon > self.epsilon_min:
-        self.epsilon *= self.epsilon_decay 
-
-    def load(self, path):
-        self.model.load_weights(path)
-        self.update_target()
-
-    def save(self, path):
-        self.model.save_weights(path)
+        self.epsilon *= self.epsilon_decay
 
 # --- Neighbors ---
 def optimal_neighbors(number, max_neighbors=2):
@@ -1509,6 +1502,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
