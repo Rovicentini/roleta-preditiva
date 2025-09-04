@@ -1106,23 +1106,6 @@ def preload_dqn_with_history(agent, history, model, top_k=3):
                 logger.info(f"[PRELOAD] Processados {count}/{len(history)-SEQUENCE_LEN} exemplos")
 
 
-# --- UI ---
-st.set_page_config(layout="centered")
-st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (REVISADO)")
-
-st.markdown("### Inserir histórico manualmente (ex: 0,32,15,19,4,21)")
-
-if 'input_bulk' not in st.session_state:
-    st.session_state.input_bulk = ""
-if 'clear_input_bulk' not in st.session_state:
-    st.session_state.clear_input_bulk = False
-
-if st.session_state.clear_input_bulk:
-    st.session_state.input_bulk = ""
-    st.session_state.clear_input_bulk = False
-
-input_bulk = st.text_area("Cole números separados por vírgula", key="input_bulk")
-
 if st.button("Adicionar histórico"):
     if st.session_state.input_bulk and st.session_state.input_bulk.strip():
         try:
@@ -1135,19 +1118,20 @@ if st.button("Adicionar histórico"):
                 st.session_state.history.append(new_nums[i])
                 st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
             st.success(f"Adicionados {len(new_nums)} números ao histórico.")
+            
             # === Pré-treino offline após carga em massa ===
-# 1) Garante que o modelo exista
+            # 1) Garante que o modelo exista
             if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
                 st.session_state.model = build_deep_learning_model()
 
-# 2) Treina o LSTM em TODO o histórico (batch offline)
+            # 2) Treina o LSTM em TODO o histórico (batch offline)
             if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN * 2:
                 train_lstm_on_full_history(
                     st.session_state.model,
                     st.session_state.history
                 )
 
-# 3) Inicializa o DQN (se necessário)
+            # 3) Inicializa o DQN (se necessário)
             exemplo_estado = sequence_to_state(
                 st.session_state.history,
                 st.session_state.model,
@@ -1157,37 +1141,45 @@ if st.button("Adicionar histórico"):
             if st.session_state.dqn_agent is None and exemplo_estado is not None:
                 st.session_state.dqn_agent = DQNAgent(state_size=exemplo_estado.shape[0], action_size=NUM_TOTAL)
 
-# 4) Pré-carrega replay do DQN com pares (state, actions, reward, next_state)
-if st.session_state.dqn_agent is not None and st.session_state.model is not None:
-    preload_dqn_with_history(
-        st.session_state.dqn_agent,
-        st.session_state.history,
-        st.session_state.model,
-        top_k=3
-    )
-    
-    # 5) ✅ TREINO OFFLINE INTENSIVO
-    with st.spinner(f"Treinando DQN com {len(st.session_state.dqn_agent.memory)} exemplos..."):
-        # Treino pesado com múltiplas épocas
-        for epoch in range(5):  # 5 épocas de treino
-            total_loss = 0
-            for _ in range(100):  # 100 batches por época
-                loss = st.session_state.dqn_agent.replay(REPLAY_BATCH)
-                if loss:
-                    total_loss += loss
+            # 4) Pré-carrega replay do DQN com pares (state, actions, reward, next_state)
+            if st.session_state.dqn_agent is not None and st.session_state.model is not None:
+                preload_dqn_with_history(
+                    st.session_state.dqn_agent,
+                    st.session_state.history,
+                    st.session_state.model,
+                    top_k=3
+                )
+                
+                # 5) ✅ TREINO OFFLINE INTENSIVO
+                with st.spinner(f"Treinando DQN com {len(st.session_state.dqn_agent.memory)} exemplos..."):
+                    # Treino pesado com múltiplas épocas
+                    for epoch in range(5):  # 5 épocas de treino
+                        total_loss = 0
+                        for _ in range(100):  # 100 batches por época
+                            loss = st.session_state.dqn_agent.replay(REPLAY_BATCH)
+                            if loss:
+                                total_loss += loss
+                        
+                        # Reduz epsilon mais rapidamente durante treino offline
+                        st.session_state.dqn_agent.epsilon = max(
+                            EPSILON_MIN, 
+                            st.session_state.dqn_agent.epsilon * 0.7  # Decaimento mais agressivo
+                        )
+                        
+                        logger.info(f"Época {epoch+1} - Loss médio: {total_loss/100 if total_loss > 0 else 0:.4f}")
+                    
+                    st.session_state.dqn_agent.update_target()
+                    st.session_state.dqn_agent.epsilon = EPSILON_MIN  # Começa com exploração mínima após treino
+                    
+                st.success(f"DQN pré-treinado com {len(st.session_state.dqn_agent.memory)} exemplos. Epsilon: {st.session_state.dqn_agent.epsilon:.3f}")
+
+            st.session_state.clear_input_bulk = True
+            st.rerun()
             
-            # Reduz epsilon mais rapidamente durante treino offline
-            st.session_state.dqn_agent.epsilon = max(
-                EPSILON_MIN, 
-                st.session_state.dqn_agent.epsilon * 0.7  # Decaimento mais agressivo
-            )
-            
-            logger.info(f"Época {epoch+1} - Loss médio: {total_loss/100 if total_loss > 0 else 0:.4f}")
-        
-        st.session_state.dqn_agent.update_target()
-        st.session_state.dqn_agent.epsilon = EPSILON_MIN  # Começa com exploração mínima após treino
-        
-    st.success(f"DQN pré-treinado com {len(st.session_state.dqn_agent.memory)} exemplos. Epsilon: {st.session_state.dqn_agent.epsilon:.3f}")
+        except Exception as e:
+            st.error(f"Erro ao processar números: {e}")
+    else:
+        st.warning("Insira números válidos para adicionar.")
                 st.success("DQN pré-treinado com o histórico.")
 # Opcional: Atualiza prev_state para próxima decisão já usar o modelo afinado
             st.session_state.prev_state = sequence_to_state(
@@ -1501,6 +1493,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
