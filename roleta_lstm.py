@@ -116,7 +116,7 @@ BET_AMOUNT = 1.0
 # Replay/treino DQN
 TARGET_UPDATE_FREQ = 50
 REPLAY_BATCH = 256
-REPLAY_SIZE = 5000
+REPLAY_SIZE = 10000
 DQN_TRAIN_EVERY = 5
 DQN_LEARNING_RATE = 1e-3
 DQN_GAMMA = 0.40
@@ -827,7 +827,7 @@ class DQNAgent:
 
     def replay(self, batch_size=REPLAY_BATCH):
         if len(self.memory) < batch_size:
-            return
+            return None
         
         batch = random.sample(self.memory, batch_size)
         states = np.array([b[0] for b in batch])
@@ -861,6 +861,11 @@ class DQNAgent:
             
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+        try:
+        history = self.model.fit(np.array(X), np.array(Y), epochs=1, verbose=0)
+        return history.history['loss'][0]  # ← Retorna o valor de loss
+    except Exception:
+        return None    
 
     def load(self, path):
         self.model.load_weights(path)
@@ -1066,7 +1071,7 @@ def train_lstm_on_full_history(model, history, epochs=20, batch_size=64):
 def preload_dqn_with_history(agent, history, model, top_k=3):
     """
     Preenche a memória de replay do DQN usando o histórico:
-    - Para cada estado, usa as previsões do DQN (com exploração) como "ações tomadas"
+    - Para cada estado, usa previsões HÍBRIDAS: 70% LSTM + 30% DQN
     - Calcula a recompensa contra o próximo número real
     - Armazena (state, actions, reward, next_state) no replay
     """
@@ -1082,8 +1087,15 @@ def preload_dqn_with_history(agent, history, model, top_k=3):
                                       st.session_state.feat_stats['means'],
                                       st.session_state.feat_stats['stds'])
             
-            # ✅ Ações geradas pelo DQN com exploração
-            actions = agent.act_top_k(state, k=top_k, use_epsilon=True)
+            # ✅ USE AÇÕES HÍBRIDAS: 70% LSTM + 30% DQN durante pré-carregamento
+            if random.random() < 0.7:  # 70% das vezes usa LSTM como professor
+                pred_info = predict_next_numbers(model, past, top_k=top_k)
+                if pred_info and 'top_numbers' in pred_info:
+                    actions = [n for n, _ in pred_info['top_numbers']]
+                else:
+                    actions = agent.act_top_k(state, k=top_k, use_epsilon=True)
+            else:  # 30% das vezes usa DQN
+                actions = agent.act_top_k(state, k=top_k, use_epsilon=True)
             
             # Próximo estado e outcome observado
             next_state = sequence_to_state(history[:i+1], model,
@@ -1100,6 +1112,10 @@ def preload_dqn_with_history(agent, history, model, top_k=3):
             )
 
             agent.remember(state, actions, reward, next_state, False)
+            
+            count += 1
+            if count % 100 == 0:  # Log a cada 100 exemplos
+                logger.info(f"[PRELOAD] Processados {count}/{len(history)-SEQUENCE_LEN} exemplos")
 
 
 # --- UI ---
@@ -1153,19 +1169,37 @@ if st.button("Adicionar histórico"):
             if st.session_state.dqn_agent is None and exemplo_estado is not None:
                 st.session_state.dqn_agent = DQNAgent(state_size=exemplo_estado.shape[0], action_size=NUM_TOTAL)
 
-# 4) Pré-carrega replay do DQN com pares (state, actions=LSTM_topk, reward, next_state)
-            if st.session_state.dqn_agent is not None and st.session_state.model is not None:
-                preload_dqn_with_history(
-                    st.session_state.dqn_agent,
-                    st.session_state.history,
-                    st.session_state.model,
-                    top_k=3
-                )
-    # 5) Executa algumas iterações de treino em cima do replay carregado
-                with st.spinner("Executando treino inicial do DQN..."):
-                    for _ in range(40):   # ajuste fino: 20–100
-                        st.session_state.dqn_agent.replay(REPLAY_BATCH)
-                    st.session_state.dqn_agent.update_target()
+# 4) Pré-carrega replay do DQN com pares (state, actions, reward, next_state)
+if st.session_state.dqn_agent is not None and st.session_state.model is not None:
+    preload_dqn_with_history(
+        st.session_state.dqn_agent,
+        st.session_state.history,
+        st.session_state.model,
+        top_k=3
+    )
+    
+    # 5) ✅ TREINO OFFLINE INTENSIVO
+    with st.spinner(f"Treinando DQN com {len(st.session_state.dqn_agent.memory)} exemplos..."):
+        # Treino pesado com múltiplas épocas
+        for epoch in range(5):  # 5 épocas de treino
+            total_loss = 0
+            for _ in range(100):  # 100 batches por época
+                loss = st.session_state.dqn_agent.replay(REPLAY_BATCH)
+                if loss:
+                    total_loss += loss
+            
+            # Reduz epsilon mais rapidamente durante treino offline
+            st.session_state.dqn_agent.epsilon = max(
+                EPSILON_MIN, 
+                st.session_state.dqn_agent.epsilon * 0.7  # Decaimento mais agressivo
+            )
+            
+            logger.info(f"Época {epoch+1} - Loss médio: {total_loss/100 if total_loss > 0 else 0:.4f}")
+        
+        st.session_state.dqn_agent.update_target()
+        st.session_state.dqn_agent.epsilon = EPSILON_MIN  # Começa com exploração mínima após treino
+        
+    st.success(f"DQN pré-treinado com {len(st.session_state.dqn_agent.memory)} exemplos. Epsilon: {st.session_state.dqn_agent.epsilon:.3f}")
                 st.success("DQN pré-treinado com o histórico.")
 # Opcional: Atualiza prev_state para próxima decisão já usar o modelo afinado
             st.session_state.prev_state = sequence_to_state(
@@ -1479,6 +1513,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
