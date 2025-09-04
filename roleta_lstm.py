@@ -942,7 +942,7 @@ def compute_reward(action_numbers, outcome_number, lstm_sugestoes=None,
     if lstm_sugestoes:
         lstm_set = set(lstm_sugestoes)
         dqn_set = set(action_numbers)
-    if outcome_number in dqn_set and outcome_number not in lstm_set:
+        if outcome_number in dqn_set and outcome_number not in lstm_set:
         bonus_superacao = 2.0  # DQN acertou sozinho
 
     reward += bonus_superacao
@@ -1481,6 +1481,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
