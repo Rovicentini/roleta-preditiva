@@ -283,17 +283,23 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
     features = get_advanced_features(seq_slice, feat_means, feat_stds)
     one_hot_seq = sequence_to_one_hot(seq_slice)
 
+    # ✅ INICIALIZE TODAS AS VARIÁVEIS ANTES DO BLOCO IF
     num_probs = np.zeros(NUM_TOTAL)
     color_probs = np.zeros(3)
     dozen_probs = np.zeros(4)
-    entropy_vector = np.array([0.0])  # Valor neutro se não for possível calcular
+    neighbors_probs = np.zeros(NUM_TOTAL)    # ← Inicialize aqui
+    regions_probs = np.zeros(len(REGIONS))   # ← Inicialize aqui  
+    eohl_probs = np.zeros(4)                 # ← Inicialize aqui
+    entropy_vector = np.array([0.0])
+    
     if model is not None and len(sequence) >= SEQUENCE_LEN:
         try:
             seq_arr = np.expand_dims(one_hot_seq, axis=0)
             feat_arr = np.array([features])
             raw = model.predict([seq_arr, feat_arr], verbose=0)
-            # CORREÇÃO: o modelo agora tem 6 saídas
-            if isinstance(raw, list) and len(raw) >= 3:
+            
+            # ✅ CORREÇÃO: Mude para 6 saídas
+            if isinstance(raw, list) and len(raw) >= 6:
                 num_probs = np.array(raw[0][0])
                 entropy = -np.sum(num_probs * np.log(num_probs + 1e-9))
                 entropy_norm = entropy / np.log(len(num_probs))
@@ -307,6 +313,8 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
                 num_probs = np.array(raw)[0]
         except Exception:
             pass
+        
+        # ✅ Movi o cálculo de entropia para dentro do bloco if
         entropy = -np.sum(num_probs * np.log(num_probs + 1e-9))
         entropy_norm = entropy / np.log(len(num_probs))
         entropy_vector = np.array([entropy_norm])
@@ -440,9 +448,9 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
         color_vector,
         region_vector,
         entropy_vector,
-        neighbors_probs,
-        regions_probs,
-        eohl_probs
+        neighbors_probs,    # ← Agora sempre definido
+        regions_probs,      # ← Agora sempre definido  
+        eohl_probs          # ← Agora sempre definido
     ]).astype(np.float32)
 
     return state
@@ -1467,6 +1475,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
