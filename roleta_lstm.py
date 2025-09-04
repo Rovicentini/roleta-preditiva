@@ -43,7 +43,8 @@ def log_dqn_step(episode, step, state, action, reward, q_values, epsilon, loss=N
         logger.error(f"Erro ao registrar log DQN: {e}")
 
 def avaliar_previsao(apostas, sorteados, stats):
-    acertos = len(set(apostas) & set([sorteados]))
+    # CORREÇÃO: Use sorteados diretamente, não como lista
+    acertos = 1 if sorteados in apostas else 0
     stats['acertos'] += acertos
     stats['rodadas'] += 1
 
@@ -277,7 +278,7 @@ def sequence_to_one_hot(sequence):
     return np.array(one_hot_seq)
 
 # Flag para alternar entre LSTM puro e híbrido
-USE_LSTM_ONLY = True  # mude para False para voltar a usar DQN
+USE_LSTM_ONLY = false  # mude para False para voltar a usar DQN
 
 def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
     seq_slice = sequence[-SEQUENCE_LEN:] if sequence else []
@@ -1081,7 +1082,7 @@ def preload_dqn_with_history(agent, history, model, top_k=3):
                                       st.session_state.feat_stats['means'],
                                       st.session_state.feat_stats['stds'])
             
-            # 🎯 MUDANÇA CRÍTICA: Ações geradas pelo DQN com exploração
+            # ✅ Ações geradas pelo DQN com exploração
             actions = agent.act_top_k(state, k=top_k, use_epsilon=True)
             
             # Próximo estado e outcome observado
@@ -1090,16 +1091,13 @@ def preload_dqn_with_history(agent, history, model, top_k=3):
                                            st.session_state.feat_stats['stds'])
             outcome = history[i]
             
-            # 🎯 CORREÇÃO: Chamar compute_reward sem lstm_sugestoes durante pré-carregamento
             reward, acertos_exatos, acertos_vizinhos = compute_reward(
                 actions,
                 outcome,
-                lstm_sugestoes=None,  # ← Não usar sugestões LSTM durante pré-carregamento
+                lstm_sugestoes=None,  # Não usar LSTM durante pré-carregamento
                 bet_amount=BET_AMOUNT,
                 max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD
             )
-
-            logger.info(f"[PRELOAD] Recompensa: {reward} | Exatos: {acertos_exatos} | Vizinhos: {acertos_vizinhos}")
 
             agent.remember(state, actions, reward, next_state, False)
 
@@ -1396,14 +1394,7 @@ if st.session_state.model is not None and len(st.session_state.history) > SEQUEN
         st.session_state.feat_stats['stds']
     )
 
-    pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
-    if pred_info and 'top_numbers' in pred_info:
-        st.session_state.lstm_predictions = pred_info['top_numbers']
-        st.session_state.prev_actions = [n for n, _ in pred_info['top_numbers']]
-        st.subheader("🎯 Previsões LSTM")
-        for n, conf in pred_info['top_numbers']:
-            st.write(f"Número: **{n}** — Probabilidade: {conf:.2%}")
-
+   
 # Define ações sugeridas
 if USE_LSTM_ONLY and st.session_state.model is not None:
     pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
@@ -1430,6 +1421,13 @@ if USE_LSTM_ONLY and st.session_state.model is not None:
             st.write(f"Número: **{n}** — Probabilidade: {conf:.2%}")
         
         # 🎯 NOVO: Painel explicativo
+        # ✅ Adicione esta linha antes do painel explicativo:
+freq_counter = np.zeros(NUM_TOTAL)
+freq_window = st.session_state.history[-100:] if len(st.session_state.history) >= 100 else st.session_state.history
+for num_val in freq_window:
+    if 0 <= num_val < NUM_TOTAL:
+        freq_counter[num_val] += 1
+freq_vector = freq_counter / max(1, np.sum(freq_counter))
         st.subheader("🔍 Justificativa da Previsão")
         if pred_info['top_numbers']:
             numero_principal = pred_info['top_numbers'][0][0]
@@ -1481,6 +1479,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
