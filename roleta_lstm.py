@@ -299,7 +299,10 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
                 entropy_norm = entropy / np.log(len(num_probs))
                 entropy_vector = np.array([entropy_norm])
                 color_probs = np.array(raw[1][0])
-                dozen_probs = np.array(raw[2][0])
+                dozen_probs = np.array(raw[2][0])    
+                neighbors_probs = np.array(raw[3][0])
+                regions_probs = np.array(raw[4][0])
+                eohl_probs = np.array(raw[5][0])
             else:
                 num_probs = np.array(raw)[0]
         except Exception:
@@ -437,16 +440,35 @@ def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
         color_vector,
         region_vector,
         entropy_vector,
+        neighbors_probs,
+        regions_probs,
+        eohl_probs
     ]).astype(np.float32)
 
     return state
 
-def filtrar_apostas_por_confianca(probabilidades, q_values, freq_vector, limiar=0.6):
-    score = (
-        0.5 * np.array(probabilidades) +
-        0.3 * np.array(q_values) +
-        0.2 * np.array(freq_vector)
-    )
+def filtrar_apostas_por_confianca(probabilidades, q_values, freq_vector, 
+                                 neighbors_probs=None, regions_probs=None, limiar=0.6):
+    """
+    Filtra apostas combinando múltiplas fontes de confiança
+    """
+    # Se não tiver dados adicionais, usa a versão simples
+    if neighbors_probs is None or regions_probs is None:
+        score = (
+            0.5 * np.array(probabilidades) +
+            0.3 * np.array(q_values) +
+            0.2 * np.array(freq_vector)
+        )
+    else:
+        # 🎯 Versão avançada com múltiplas fontes
+        score = (
+            0.4 * np.array(probabilidades) +
+            0.3 * np.array(q_values) +
+            0.2 * np.array(freq_vector) +
+            0.05 * np.array(neighbors_probs) +
+            0.05 * np.array(regions_probs)
+        )
+    
     indices = np.where(score >= limiar)[0]
     return indices.tolist()
 
@@ -858,8 +880,10 @@ def filter_actions_by_region(actions, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD):
 # =========================
 # RECOMPENSA FOCADA E SIMPLIFICADA
 # =========================
-def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
+def compute_reward(action_numbers, outcome_number, lstm_sugestoes=None,
+                   bet_amount=BET_AMOUNT,
                    max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD):
+
     action_numbers = set([a for a in action_numbers if 0 <= a <= 36])
 
     # Acertos exatos
@@ -894,6 +918,16 @@ def compute_reward(action_numbers, outcome_number, bet_amount=BET_AMOUNT,
 
     # Penalidade proporcional ao número de apostas
     reward -= bet_penalty
+                       
+    # Bônus se DQN acertar sem ajuda do LSTM
+    bonus_superacao = 0.0
+    if lstm_sugestoes:
+        lstm_set = set(lstm_sugestoes)
+        dqn_set = set(action_numbers)
+    if outcome_number in dqn_set and outcome_number not in lstm_set:
+        bonus_superacao = 2.0  # DQN acertou sozinho
+
+    reward += bonus_superacao
 
     return reward * bet_amount, acertos_exatos, acertos_vizinhos
 
@@ -1013,7 +1047,7 @@ def train_lstm_on_full_history(model, history, epochs=20, batch_size=64):
 def preload_dqn_with_history(agent, history, model, top_k=3):
     """
     Preenche a memória de replay do DQN usando o histórico:
-    - Para cada estado, usa as previsões do LSTM (top_k) como "ações tomadas"
+    - Para cada estado, usa as previsões do DQN (com exploração) como "ações tomadas"
     - Calcula a recompensa contra o próximo número real
     - Armazena (state, actions, reward, next_state) no replay
     """
@@ -1028,10 +1062,9 @@ def preload_dqn_with_history(agent, history, model, top_k=3):
             state = sequence_to_state(past, model,
                                       st.session_state.feat_stats['means'],
                                       st.session_state.feat_stats['stds'])
-            # Previsões do LSTM para esse estado
-            # Ações geradas pelo DQN com exploração
+            
+            # 🎯 MUDANÇA CRÍTICA: Ações geradas pelo DQN com exploração
             actions = agent.act_top_k(state, k=top_k, use_epsilon=True)
-
             
             # Próximo estado e outcome observado
             next_state = sequence_to_state(history[:i+1], model,
@@ -1213,6 +1246,7 @@ if st.session_state.prev_state is not None and st.session_state.prev_actions is 
     recompensa, acertos_exatos, acertos_vizinhos = compute_reward(
         st.session_state.prev_actions,
         num,
+        lstm_sugestoes=[n for n, _ in st.session_state.lstm_predictions] if st.session_state.lstm_predictions else None,
         bet_amount=BET_AMOUNT,
         max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD
     )
@@ -1257,45 +1291,58 @@ if st.session_state.prev_state is not None and st.session_state.prev_actions is 
             logger.error(f"Erro ao logar passo DQN: {e}")
 
         # ✅ Obtenha as probabilidades atuais do LSTM
-        num_probs = np.zeros(NUM_TOTAL)
-        freq_vector = np.zeros(NUM_TOTAL)
+num_probs = np.zeros(NUM_TOTAL)
+neighbors_probs = np.zeros(NUM_TOTAL)
+regions_probs = np.zeros(len(REGIONS))
+freq_vector = np.zeros(NUM_TOTAL)
+
+if st.session_state.model is not None and len(st.session_state.history) >= SEQUENCE_LEN:
+    try:
+        seq_slice = st.session_state.history[-SEQUENCE_LEN:] if st.session_state.history else []
+        feat = get_advanced_features(seq_slice, st.session_state.feat_stats['means'], st.session_state.feat_stats['stds'])
+        seq_one_hot = sequence_to_one_hot(seq_slice).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
+        raw = st.session_state.model.predict([seq_one_hot, np.array([feat])], verbose=0)
         
-        if st.session_state.model is not None and len(st.session_state.history) >= SEQUENCE_LEN:
-            try:
-                seq_slice = st.session_state.history[-SEQUENCE_LEN:] if st.session_state.history else []
-                feat = get_advanced_features(seq_slice, st.session_state.feat_stats['means'], st.session_state.feat_stats['stds'])
-                seq_one_hot = sequence_to_one_hot(seq_slice).reshape(1, SEQUENCE_LEN, NUM_TOTAL)
-                raw = st.session_state.model.predict([seq_one_hot, np.array([feat])], verbose=0)
-                num_probs = np.array(raw[0][0]) if isinstance(raw, list) and len(raw) > 0 else np.array(raw)[0]
-                
-                # Calcule freq_vector
-                freq_counter = np.zeros(NUM_TOTAL)
-                freq_window = st.session_state.history[-100:] if len(st.session_state.history) >= 100 else st.session_state.history
-                for num_val in freq_window:
-                    if 0 <= num_val < NUM_TOTAL:
-                        freq_counter[num_val] += 1
-                freq_vector = freq_counter / max(1, np.sum(freq_counter))
-            except Exception as e:
-                logger.error(f"Erro ao obter probabilidades LSTM: {e}")
+        # Extrai todas as probabilidades
+        if isinstance(raw, list) and len(raw) >= 6:
+            num_probs = np.array(raw[0][0])
+            neighbors_probs = np.array(raw[3][0])  # 👈 neighbors_probs
+            regions_probs = np.array(raw[4][0])    # 👈 regions_probs
+        
+        # Calcule freq_vector
+        freq_counter = np.zeros(NUM_TOTAL)
+        freq_window = st.session_state.history[-100:] if len(st.session_state.history) >= 100 else st.session_state.history
+        for num_val in freq_window:
+            if 0 <= num_val < NUM_TOTAL:
+                freq_counter[num_val] += 1
+        freq_vector = freq_counter / max(1, np.sum(freq_counter))
+    except Exception as e:
+        logger.error(f"Erro ao obter probabilidades LSTM: {e}")
 
-        # ✅ Aplicando filtro de apostas por confiança combinada
-        apostas_final = filtrar_apostas_por_confianca(num_probs, q_vals, freq_vector)
+# ✅ Aplicando filtro de apostas por confiança combinada (versão avançada)
+apostas_final = filtrar_apostas_por_confianca(
+    num_probs, 
+    q_vals, 
+    freq_vector,
+    neighbors_probs,    # 👈 Novo parâmetro
+    regions_probs       # 👈 Novo parâmetro
+)
 
-        # Atualiza estatísticas
-        st.session_state.stats['bets'] += 1
-        st.session_state.stats['profit'] += recompensa
-        if recompensa > 0:
-            st.session_state.stats['wins'] += 1
-            st.session_state.stats['streak'] += 1
-            st.session_state.stats['max_streak'] = max(st.session_state.stats['max_streak'], st.session_state.stats['streak'])
-        else:
-            st.session_state.stats['streak'] = 0
+# Atualiza estatísticas
+st.session_state.stats['bets'] += 1
+st.session_state.stats['profit'] += recompensa
+if recompensa > 0:
+    st.session_state.stats['wins'] += 1
+    st.session_state.stats['streak'] += 1
+    st.session_state.stats['max_streak'] = max(st.session_state.stats['max_streak'], st.session_state.stats['streak'])
+else:
+    st.session_state.stats['streak'] = 0
 
-        st.session_state.step_count += 1
-        if st.session_state.dqn_agent is not None:
-            st.session_state.dqn_agent.replay(REPLAY_BATCH)
-        if st.session_state.dqn_agent is not None and st.session_state.step_count % TARGET_UPDATE_FREQ == 0:
-            st.session_state.dqn_agent.update_target()
+st.session_state.step_count += 1
+if st.session_state.dqn_agent is not None:
+    st.session_state.dqn_agent.replay(REPLAY_BATCH)
+if st.session_state.dqn_agent is not None and st.session_state.step_count % TARGET_UPDATE_FREQ == 0:
+    st.session_state.dqn_agent.update_target()
 
 # Inicializa e treina LSTM se já houver dados suficientes
 if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
@@ -1322,6 +1369,44 @@ if st.session_state.model is not None and len(st.session_state.history) > SEQUEN
 if USE_LSTM_ONLY and st.session_state.model is not None:
     pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
     acoes_sugeridas = [n for n, _ in pred_info['top_numbers']] if pred_info else random.sample(range(NUM_TOTAL), 3)
+    
+    # 🎯 CORREÇÃO: Obter q_vals para o painel explicativo
+    if st.session_state.dqn_agent is not None and st.session_state.prev_state is not None:
+        try:
+            q_vals = st.session_state.dqn_agent.model.predict(
+                np.array([st.session_state.prev_state]), verbose=0
+            )[0]
+        except:
+            q_vals = np.zeros(NUM_TOTAL)
+    else:
+        q_vals = np.zeros(NUM_TOTAL)
+    
+    # 🎯 NOVO: Exibir previsões com painel explicativo
+    st.subheader("🎯 Previsões LSTM")
+    if pred_info and 'top_numbers' in pred_info:
+        st.session_state.lstm_predictions = pred_info['top_numbers']
+        st.session_state.prev_actions = [n for n, _ in pred_info['top_numbers']]
+        
+        for n, conf in pred_info['top_numbers']:
+            st.write(f"Número: **{n}** — Probabilidade: {conf:.2%}")
+        
+        # 🎯 NOVO: Painel explicativo
+        st.subheader("🔍 Justificativa da Previsão")
+        if pred_info['top_numbers']:
+            numero_principal = pred_info['top_numbers'][0][0]
+            st.write(f"**Número {numero_principal}:**")
+            st.write(f"• Probabilidade LSTM: {pred_info['num_probs'][numero_principal]:.3f}")
+            st.write(f"• Q-value DQN: {q_vals[numero_principal]:.3f}")
+            st.write(f"• Frequência histórica: {freq_vector[numero_principal]:.3f}")
+            
+            # Informações adicionais contextuais
+            if numero_principal in WHEEL_ORDER:
+                idx = WHEEL_ORDER.index(numero_principal)
+                st.write(f"• Probabilidade de vizinhos: {pred_info['neighbors_probs'][idx]:.3f}")
+            
+            region_idx = number_to_region(numero_principal)
+            if region_idx != -1:
+                st.write(f"• Probabilidade de região: {pred_info['regions_probs'][region_idx]:.3f}")
 elif st.session_state.dqn_agent is not None and st.session_state.prev_state is not None:
     possiveis_acoes = st.session_state.dqn_agent.act_top_k(st.session_state.prev_state, k=5, use_epsilon=True)
     acoes_sugeridas = filter_actions_by_region(possiveis_acoes, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
