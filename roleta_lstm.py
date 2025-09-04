@@ -1166,15 +1166,15 @@ if st.button("Adicionar histórico"):
                             st.session_state.dqn_agent.epsilon * 0.7  # Decaimento mais agressivo
                         )
                         
-                        logger.info(f"Época {epoch+1} - Loss médio: {total_loss/100 if total_loss > 0 else 0:.4f}")
-                    
-                    st.session_state.dqn_agent.update_target()
-                    st.session_state.dqn_agent.epsilon = EPSILON_MIN  # Começa com exploração mínima após treino
-                    
-                st.success(f"DQN pré-treinado com {len(st.session_state.dqn_agent.memory)} exemplos. Epsilon: {st.session_state.dqn_agent.epsilon:.3f}")
+                                        logger.info(f"Época {epoch+1} - Loss médio: {total_loss/100 if total_loss > 0 else 0:.4f}")
+            
+            st.session_state.dqn_agent.update_target()
+            st.session_state.dqn_agent.epsilon = EPSILON_MIN  # Começa com exploração mínima após treino
+            
+        st.success(f"DQN pré-treinado com {len(st.session_state.dqn_agent.memory)} exemplos. Epsilon: {st.session_state.dqn_agent.epsilon:.3f}")
 
-            st.session_state.clear_input_bulk = True
-            st.rerun()
+    st.session_state.clear_input_bulk = True
+    st.rerun()
             
         except Exception as e:
             st.error(f"Erro ao processar números: {e}")
@@ -1493,6 +1493,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
