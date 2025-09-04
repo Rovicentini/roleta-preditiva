@@ -460,13 +460,21 @@ def filtrar_apostas_por_confianca(probabilidades, q_values, freq_vector,
             0.2 * np.array(freq_vector)
         )
     else:
+        # 🎯 CORREÇÃO: Garantir que regions_probs tenha o mesmo tamanho
+        # regions_probs tem tamanho 6 (número de regiões), precisamos mapear para 37 números
+        regions_probs_expanded = np.zeros(len(probabilidades))
+        for num in range(len(probabilidades)):
+            region_idx = number_to_region(num)
+            if region_idx != -1 and region_idx < len(regions_probs):
+                regions_probs_expanded[num] = regions_probs[region_idx]
+        
         # 🎯 Versão avançada com múltiplas fontes
         score = (
             0.4 * np.array(probabilidades) +
             0.3 * np.array(q_values) +
             0.2 * np.array(freq_vector) +
             0.05 * np.array(neighbors_probs) +
-            0.05 * np.array(regions_probs)
+            0.05 * regions_probs_expanded  # ← Usando a versão expandida
         )
     
     indices = np.where(score >= limiar)[0]
@@ -1453,6 +1461,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
