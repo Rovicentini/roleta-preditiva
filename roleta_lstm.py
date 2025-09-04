@@ -1117,7 +1117,6 @@ if st.button("Adicionar histórico"):
             for i in range(len(new_nums)):
                 st.session_state.history.append(new_nums[i])
                 st.session_state.co_occurrence_matrix = update_co_occurrence_matrix(st.session_state.co_occurrence_matrix, st.session_state.history)
-            st.success(f"Adicionados {len(new_nums)} números ao histórico.")
             
             # === TODO O CÓDIGO DE PRÉ-TREINO OFFLINE VEM AQUI DENTRO ===
             # 1) Garante que o modelo exista
@@ -1180,7 +1179,7 @@ if st.button("Adicionar histórico"):
             )
 
             st.session_state.clear_input_bulk = True
-            st.rerun()
+          
             
         except Exception as e:  # ← AQUI TERMINA O try
             st.error(f"Erro ao processar números: {e}")
@@ -1465,6 +1464,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
