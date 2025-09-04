@@ -89,6 +89,8 @@ if 'clear_input_bulk' not in st.session_state:
     st.session_state.clear_input_bulk = False
 if 'co_occurrence_matrix' not in st.session_state:
     st.session_state.co_occurrence_matrix = np.zeros((37, 37))
+if 'lstm_predictions' not in st.session_state:  
+    st.session_state.lstm_predictions = None    
 
 if 'top_n_metrics' not in st.session_state:
     st.session_state.top_n_metrics = {
@@ -1260,20 +1262,24 @@ if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUE
         )
 
 # Reforço com resultado anterior
-recompensa = 0.0  # ← Inicializa a variável
+recompensa = 0.0
 acertos_exatos = []
 acertos_vizinhos = []
 
 if st.session_state.prev_state is not None and st.session_state.prev_actions is not None:
+    # ✅ CORREÇÃO: Verificar se lstm_predictions existe antes de acessar
+    lstm_sugestoes = None
+    if hasattr(st.session_state, 'lstm_predictions') and st.session_state.lstm_predictions:
+        lstm_sugestoes = [n for n, _ in st.session_state.lstm_predictions]
+    
     recompensa, acertos_exatos, acertos_vizinhos = compute_reward(
         st.session_state.prev_actions,
         num,
-        lstm_sugestoes=[n for n, _ in st.session_state.lstm_predictions] if st.session_state.lstm_predictions else None,
+        lstm_sugestoes=lstm_sugestoes,  # ← Usando a variável corrigida
         bet_amount=BET_AMOUNT,
         max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD
     )
     logger.info(f"Número sorteado: {num} | Apostas feitas: {st.session_state.prev_actions} | Acerto direto: {num in st.session_state.prev_actions}")
-
     logger.info(f"Recompensa: {recompensa} | Exatos: {acertos_exatos} | Vizinhos: {acertos_vizinhos}")
 
 
@@ -1475,6 +1481,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
