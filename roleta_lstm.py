@@ -1079,9 +1079,12 @@ def preload_dqn_with_history(agent, history, model, top_k=3):
                                            st.session_state.feat_stats['means'],
                                            st.session_state.feat_stats['stds'])
             outcome = history[i]
+            
+            # 🎯 CORREÇÃO: Chamar compute_reward sem lstm_sugestoes durante pré-carregamento
             reward, acertos_exatos, acertos_vizinhos = compute_reward(
                 actions,
                 outcome,
+                lstm_sugestoes=None,  # ← Não usar sugestões LSTM durante pré-carregamento
                 bet_amount=BET_AMOUNT,
                 max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD
             )
@@ -1089,7 +1092,6 @@ def preload_dqn_with_history(agent, history, model, top_k=3):
             logger.info(f"[PRELOAD] Recompensa: {reward} | Exatos: {acertos_exatos} | Vizinhos: {acertos_vizinhos}")
 
             agent.remember(state, actions, reward, next_state, False)
-
 
 
 # --- UI ---
@@ -1465,6 +1467,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
