@@ -278,7 +278,7 @@ def sequence_to_one_hot(sequence):
     return np.array(one_hot_seq)
 
 # Flag para alternar entre LSTM puro e híbrido
-USE_LSTM_ONLY = false  # mude para False para voltar a usar DQN
+USE_LSTM_ONLY = False  # mude para False para voltar a usar DQN
 
 def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
     seq_slice = sequence[-SEQUENCE_LEN:] if sequence else []
@@ -1479,6 +1479,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
