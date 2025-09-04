@@ -1306,8 +1306,8 @@ if st.session_state.model is not None and len(st.session_state.history) >= SEQUE
         # Extrai todas as probabilidades
         if isinstance(raw, list) and len(raw) >= 6:
             num_probs = np.array(raw[0][0])
-            neighbors_probs = np.array(raw[3][0])  # 👈 neighbors_probs
-            regions_probs = np.array(raw[4][0])    # 👈 regions_probs
+            neighbors_probs = np.array(raw[3][0])
+            regions_probs = np.array(raw[4][0])
         
         # Calcule freq_vector
         freq_counter = np.zeros(NUM_TOTAL)
@@ -1319,13 +1319,24 @@ if st.session_state.model is not None and len(st.session_state.history) >= SEQUE
     except Exception as e:
         logger.error(f"Erro ao obter probabilidades LSTM: {e}")
 
+# ✅ Obter q_vals para a filtragem
+if st.session_state.dqn_agent is not None and st.session_state.prev_state is not None:
+    try:
+        q_vals_filter = st.session_state.dqn_agent.model.predict(
+            np.array([st.session_state.prev_state]), verbose=0
+        )[0]
+    except:
+        q_vals_filter = np.zeros(NUM_TOTAL)
+else:
+    q_vals_filter = np.zeros(NUM_TOTAL)
+
 # ✅ Aplicando filtro de apostas por confiança combinada (versão avançada)
 apostas_final = filtrar_apostas_por_confianca(
     num_probs, 
-    q_vals, 
+    q_vals_filter,  # ← Usando a variável correta
     freq_vector,
-    neighbors_probs,    # 👈 Novo parâmetro
-    regions_probs       # 👈 Novo parâmetro
+    neighbors_probs,
+    regions_probs
 )
 
 # Atualiza estatísticas
@@ -1442,6 +1453,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
