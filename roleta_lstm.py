@@ -1165,8 +1165,7 @@ if st.button("Adicionar histórico"):
                             EPSILON_MIN, 
                             st.session_state.dqn_agent.epsilon * 0.7  # Decaimento mais agressivo
                         )
-                        
-                                        logger.info(f"Época {epoch+1} - Loss médio: {total_loss/100 if total_loss > 0 else 0:.4f}")
+                         logger.info(f"Época {epoch+1} - Loss médio: {total_loss/100 if total_loss > 0 else 0:.4f}")
             
             st.session_state.dqn_agent.update_target()
             st.session_state.dqn_agent.epsilon = EPSILON_MIN  # Começa com exploração mínima após treino
@@ -1493,6 +1492,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
