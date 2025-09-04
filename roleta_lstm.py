@@ -824,44 +824,43 @@ class DQNAgent:
             return int(np.argmax(q_values))
         except Exception:
             return random.randrange(self.action_size)
-
-   def replay(self, batch_size=REPLAY_BATCH):
-    if len(self.memory) < batch_size:
-        return None
+    def replay(self, batch_size=REPLAY_BATCH):
+        if len(self.memory) < batch_size:
+            return None
         
-    batch = random.sample(self.memory, batch_size)
-    states = np.array([b[0] for b in batch])
-    next_states = np.array([b[3] for b in batch])
-    if states.size == 0 or next_states.size == 0:
-        return None
-    
-    try:
-        next_q_target = self.model.predict(next_states, verbose=0)
-        next_actions = np.argmax(next_q_target, axis=1)
-        next_q_values = self.target_model.predict(next_states, verbose=0)
-        q_curr = self.model.predict(states, verbose=0)
-    except Exception:
-        return None
-
-    X, Y = [], []
-    for i, (state, actions, reward, next_state, done) in enumerate(batch):
-        target = q_curr[i].copy()
-        for action in actions:
-            if done:
-                target[action] = reward
-            else:
-                target[action] = reward + self.gamma * next_q_values[i][next_actions[i]]
-        X.append(state)
-        Y.append(target)
-    
-    try:
-        history = self.model.fit(np.array(X), np.array(Y), epochs=1, verbose=0)
-        return history.history['loss'][0]
-    except Exception:
-        return None
+        batch = random.sample(self.memory, batch_size)
+        states = np.array([b[0] for b in batch])
+        next_states = np.array([b[3] for b in batch])
+        if states.size == 0 or next_states.size == 0:
+            return None
         
-    if self.epsilon > self.epsilon_min:
-        self.epsilon *= self.epsilon_decay
+        try:
+            next_q_target = self.model.predict(next_states, verbose=0)
+            next_actions = np.argmax(next_q_target, axis=1)
+            next_q_values = self.target_model.predict(next_states, verbose=0)
+            q_curr = self.model.predict(states, verbose=0)
+        except Exception:
+            return None
+
+        X, Y = [], []
+        for i, (state, actions, reward, next_state, done) in enumerate(batch):
+            target = q_curr[i].copy()
+            for action in actions:
+                if done:
+                    target[action] = reward
+                else:
+                    target[action] = reward + self.gamma * next_q_values[i][next_actions[i]]
+            X.append(state)
+            Y.append(target)
+        
+        try:
+            history = self.model.fit(np.array(X), np.array(Y), epochs=1, verbose=0)
+            return history.history['loss'][0]
+        except Exception:
+            return None
+            
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
 
 # --- Neighbors ---
 def optimal_neighbors(number, max_neighbors=2):
@@ -1502,6 +1501,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
