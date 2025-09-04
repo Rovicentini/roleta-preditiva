@@ -1422,12 +1422,12 @@ if USE_LSTM_ONLY and st.session_state.model is not None:
         
         # 🎯 NOVO: Painel explicativo
         # ✅ Adicione esta linha antes do painel explicativo:
-freq_counter = np.zeros(NUM_TOTAL)
-freq_window = st.session_state.history[-100:] if len(st.session_state.history) >= 100 else st.session_state.history
-for num_val in freq_window:
-    if 0 <= num_val < NUM_TOTAL:
-        freq_counter[num_val] += 1
-freq_vector = freq_counter / max(1, np.sum(freq_counter))
+        freq_counter = np.zeros(NUM_TOTAL)
+        freq_window = st.session_state.history[-100:] if len(st.session_state.history) >= 100 else st.session_state.history
+        for num_val in freq_window:
+            if 0 <= num_val < NUM_TOTAL:
+                freq_counter[num_val] += 1
+        freq_vector = freq_counter / max(1, np.sum(freq_counter))
         st.subheader("🔍 Justificativa da Previsão")
         if pred_info['top_numbers']:
             numero_principal = pred_info['top_numbers'][0][0]
@@ -1479,6 +1479,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
