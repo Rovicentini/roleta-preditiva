@@ -758,7 +758,13 @@ if st.session_state.last_input is not None:
         # ... (resto do processamento) ...
 
 # ... (no final, adicionar nova seção de gerenciamento de banca) ...
+except Exception as e:
+    logger.error(f"Erro não tratado: {e}")
+    pass
 
+# --- UI ---
+st.set_page_config(layout="wide")
+st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (ULTRA REVISADO)")
 # --- UI ---
 st.set_page_config(layout="wide")
 st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (ULTRA REVISADO)")
@@ -2189,6 +2195,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
