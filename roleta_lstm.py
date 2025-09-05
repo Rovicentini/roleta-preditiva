@@ -277,7 +277,7 @@ def sequence_to_one_hot(sequence):
     return np.array(one_hot_seq)
 
 # Flag para alternar entre LSTM puro e híbrido
-USE_LSTM_ONLY = True  # mude para False para voltar a usar DQN
+USE_LSTM_ONLY = False  # mude para False para voltar a usar DQN
 
 def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
     seq_slice = sequence[-SEQUENCE_LEN:] if sequence else []
@@ -1384,6 +1384,7 @@ if st.session_state.dqn_agent is not None and st.session_state.step_count % TARG
     st.session_state.dqn_agent.update_target()
 
 # Inicializa e treina LSTM se já houver dados suficientes
+# Inicializa e treina LSTM se já houver dados suficientes
 if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
     st.session_state.model = build_deep_learning_model()
     
@@ -1396,13 +1397,8 @@ if st.session_state.model is not None and len(st.session_state.history) > SEQUEN
         st.session_state.feat_stats['stds']
     )
 
-    pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
-    if pred_info and 'top_numbers' in pred_info:
-        st.session_state.lstm_predictions = pred_info['top_numbers']
-        st.session_state.prev_actions = [n for n, _ in pred_info['top_numbers']]
-        st.subheader("🎯 Previsões LSTM")
-        for n, conf in pred_info['top_numbers']:
-            st.write(f"Número: **{n}** — Probabilidade: {conf:.2%}")
+# ✅ CORREÇÃO: REMOVIDA A SEÇÃO DUPLICADA DE PREVISÕES LSTM
+# (as previsões serão exibidas apenas na seção "Define ações sugeridas")
 
 # Define ações sugeridas
 if USE_LSTM_ONLY and st.session_state.model is not None:
@@ -1420,7 +1416,7 @@ if USE_LSTM_ONLY and st.session_state.model is not None:
     else:
         q_vals = np.zeros(NUM_TOTAL)
     
-    # 🎯 NOVO: Exibir previsões com painel explicativo
+    # 🎯 NOVO: Exibir previsões com painel explicativo (APENAS UMA VEZ)
     st.subheader("🎯 Previsões LSTM")
     if pred_info and 'top_numbers' in pred_info:
         st.session_state.lstm_predictions = pred_info['top_numbers']
@@ -1430,6 +1426,14 @@ if USE_LSTM_ONLY and st.session_state.model is not None:
             st.write(f"Número: **{n}** — Probabilidade: {conf:.2%}")
         
         # 🎯 NOVO: Painel explicativo
+        # ✅ CALCULAR freq_vector ANTES DE USAR
+        freq_counter = np.zeros(NUM_TOTAL)
+        freq_window = st.session_state.history[-100:] if len(st.session_state.history) >= 100 else st.session_state.history
+        for num_val in freq_window:
+            if 0 <= num_val < NUM_TOTAL:
+                freq_counter[num_val] += 1
+        freq_vector = freq_counter / max(1, np.sum(freq_counter))
+        
         st.subheader("🔍 Justificativa da Previsão")
         if pred_info['top_numbers']:
             numero_principal = pred_info['top_numbers'][0][0]
@@ -1458,7 +1462,6 @@ st.subheader("🤖 Ações sugeridas")
 for acao in acoes_sugeridas:
     vizinhos = optimal_neighbors(acao, max_neighbors=NEIGHBOR_RADIUS_FOR_REWARD)
     st.write(f"- Apostar no {acao} (vizinhos: {', '.join(map(str, vizinhos))})")
-
 st.markdown("---")
 st.subheader("📊 Estatísticas")
 if st.session_state.stats['bets'] > 0:
@@ -1481,3 +1484,4 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
