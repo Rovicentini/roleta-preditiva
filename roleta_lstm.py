@@ -290,11 +290,11 @@ def get_advanced_features(sequence, feat_means=None, feat_stds=None):
         ])    
         if feat_means is not None and feat_stds is not None:
         # Garante que as dimensões batem
-        if len(features) != len(feat_means):
+    if len(features) != len(feat_means):
             # Se não bater, usa normalização padrão
             features = (features - np.mean(features)) / (np.std(features) + 1e-6)
         else:
-            features = (features - feat_means) / (feat_stds + 1e-6)   
+            features = (features - feat_means) / (feat_stds + 1e-6)       
     return features
 
 # Nova função para atualizar a matriz de co-ocorrência
@@ -1577,6 +1577,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
