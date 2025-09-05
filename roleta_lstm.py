@@ -778,7 +778,7 @@ top_indices = list(np.argsort(weighted)[-top_k:][::-1])
 color_pred = int(np.argmax(color_probs))
 dozen_pred = int(np.argmax(dozen_probs))
 
-        return {
+    return {
         'top_numbers': [(int(i), float(weighted[i])) for i in top_indices],
         'num_probs': num_probs,
         'color_probs': color_probs,
@@ -1568,6 +1568,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
