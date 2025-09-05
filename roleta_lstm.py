@@ -6,7 +6,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Dropout, Attention, BatchNormalization, Conv1D, GlobalMaxPooling1D
-from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Dropout, Attention, BatchNormalization
+from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Dropout, Attention, BatchNormalization, MultiHeadAttention, LayerNormalization
 from tensorflow.keras.optimizers import Nadam, Adam
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.utils import to_categorical
@@ -18,6 +18,9 @@ from collections import Counter, deque
 import random
 import logging
 import json
+import time
+from scipy import stats
+import matplotlib.pyplot as plt
 
 def log_dqn_step(episode, step, state, action, reward, q_values, epsilon, loss=None):
     try:
@@ -71,7 +74,7 @@ if 'model' not in st.session_state:
 if 'dqn_agent' not in st.session_state:
     st.session_state.dqn_agent = None
 if 'stats' not in st.session_state:
-    st.session_state.stats = {'wins': 0, 'bets': 0, 'streak': 0, 'max_streak': 0, 'profit': 0.0}
+    st.session_state.stats = {'wins': 0, 'bets': 0, 'streak': 0, 'max_streak': 0, 'profit': 0.0, 'rodadas': 0, 'acertos': 0, 'top1': 0, 'top3': 0, 'top5': 0}
 if 'last_input' not in st.session_state:
     st.session_state.last_input = None
 if 'step_count' not in st.session_state:
@@ -90,6 +93,19 @@ if 'co_occurrence_matrix' not in st.session_state:
     st.session_state.co_occurrence_matrix = np.zeros((37, 37))
 if 'lstm_predictions' not in st.session_state:  
     st.session_state.lstm_predictions = None    
+if 'recent_bets' not in st.session_state:
+    st.session_state.recent_bets = []
+if 'performance_metrics' not in st.session_state:
+    st.session_state.performance_metrics = {
+        'last_100_accuracy': [],
+        'pattern_stability': 0.0,
+        'confidence_level': 0.0,
+        'regime_change_detected': False
+    }
+if 'ensemble_models' not in st.session_state:
+    st.session_state.ensemble_models = []
+if 'bankroll' not in st.session_state:
+    st.session_state.bankroll = 1000.0  # Bankroll inicial
 
 if 'top_n_metrics' not in st.session_state:
     st.session_state.top_n_metrics = {
@@ -108,7 +124,7 @@ if 'feat_stats' not in st.session_state:
 # --- CONSTANTS ---
 NUM_TOTAL = 37
 SEQUENCE_LEN = 20
-BET_AMOUNT = 1.0
+BASE_BET_AMOUNT = 1.0
 
 # Replay/treino DQN
 TARGET_UPDATE_FREQ = 25
@@ -118,17 +134,14 @@ DQN_TRAIN_EVERY = 3
 DQN_LEARNING_RATE = 8e-4
 DQN_GAMMA = 0.45
 
-# Recompensa (shaping)
-REWARD_EXACT = 35.0
-REWARD_NEIGHBOR = 5.0
-REWARD_COLOR = 0.0
-REWARD_DOZEN = 0.0
-REWARD_LOSS = -15.0
+# Recompensa (shaping) - REVISADO
+REWARD_EXACT = 10.0  # Reduzido de 35 para 10
+REWARD_NEIGHBOR = 2.0  # Reduzido de 5 para 2
+REWARD_LOSS = -2.0  # Reduzido de -15 para -2
 NEIGHBOR_RADIUS_FOR_REWARD = 3
 
 # Treino LSTM incremental
 LSTM_RECENT_WINDOWS = 100
-# CORREÇÃO: não referenciar variável inexistente 'history'
 LSTM_BATCH_SAMPLES = 384
 LSTM_EPOCHS_PER_STEP = 6
 LSTM_BATCH_SIZE = 48
@@ -175,6 +188,591 @@ NUMBER_TO_REGION = {n: [] for n in range(NUM_TOTAL)}
 for region_name, numbers in REGIONS.items():
     for num in numbers:
         NUMBER_TO_REGION[num].append(region_name)
+
+# --- NOVAS FUNÇÕES DE MELHORIA ---
+def adaptive_regularization(history_length):
+    """Ajusta a regularização baseado na quantidade de dados"""
+    if history_length < 100:
+        return {'l2': 1e-3, 'dropout': 0.3}
+    elif history_length < 500:
+        return {'l2': 1e-4, 'dropout': 0.4}
+    elif history_length < 1000:
+        return {'l2': 1e-5, 'dropout': 0.5}
+    else:
+        return {'l2': 1e-6, 'dropout': 0.6}
+
+def money_management_system(balance, previous_bets, confidence_level):
+    """Sistema de apostas progressivas baseado na confiança"""
+    base_bet = BASE_BET_AMOUNT
+    
+    # Martingale modificado - só aumenta com alta confiança
+    if confidence_level > 0.8:
+        last_loss = any(loss > 0 for loss in previous_bets[-3:])
+        if last_loss:
+            return min(base_bet * 2, balance * 0.1)  # Máximo 10% do bankroll
+        else:
+            return base_bet
+    elif confidence_level > 0.6:
+        return base_bet
+    else:
+        return base_bet * 0.5  # Reduz apostas em baixa confiança
+
+def physics_informed_features(wheel_history):
+    """Adiciona física real da roleta às features"""
+    features = []
+    
+    # Velocidade angular estimada
+    positions = [WHEEL_ORDER.index(n) for n in wheel_history if n in WHEEL_ORDER]
+    if len(positions) >= 2:
+        angular_velocity = (positions[-1] - positions[-2]) % 37
+        features.append(angular_velocity / 36.0)
+    
+    # Aceleração centrípeta estimada
+    if len(positions) >= 3:
+        prev_velocity = (positions[-2] - positions[-3]) % 37
+        acceleration = (angular_velocity - prev_velocity) % 37
+        features.append(acceleration / 36.0)
+    
+    # Posição preferencial da bola (hot sectors)
+    sector_counts = np.zeros(8)  # 8 setores de ~4.5 números
+    for num in wheel_history[-50:]:
+        if num in WHEEL_ORDER:
+            sector = WHEEL_ORDER.index(num) // 5
+            sector_counts[sector] += 1
+    features.extend(sector_counts / np.sum(sector_counts))
+    
+    return np.array(features)
+
+def calculate_entropy(sequence):
+    """Calcula entropia de uma sequência"""
+    counts = np.bincount(sequence, minlength=NUM_TOTAL)
+    probs = counts / np.sum(counts)
+    probs = probs[probs > 0]  # Remove zeros
+    return -np.sum(probs * np.log(probs))
+
+def detect_pattern_change(history, window_size=50):
+    """Detecta mudanças abruptas nos padrões"""
+    if len(history) < window_size * 2:
+        return False
+    
+    recent = history[-window_size:]
+    older = history[-window_size*2:-window_size]
+    
+    # Calcula entropia dos períodos
+    recent_entropy = calculate_entropy(recent)
+    older_entropy = calculate_entropy(older)
+    
+    # Se mudança maior que 30%, detecta pattern change
+    return abs(recent_entropy - older_entropy) > 0.3
+
+def conditional_dqn_reset(agent, pattern_change_detected):
+    """Reseta parcialmente o DQN se detectada mudança de padrão"""
+    if pattern_change_detected and agent:
+        # Mantém a arquitetura, mas reseta pesos com learning rate mais alto
+        try:
+            old_weights = agent.model.get_weights()
+            new_weights = []
+            
+            for weight in old_weights:
+                if len(weight.shape) > 1:  # Pesos de camadas densas
+                    noise = np.random.normal(0, 0.1, weight.shape)
+                    new_weights.append(weight * 0.5 + noise * 0.5)
+                else:  # Biases
+                    new_weights.append(weight * 0.8)
+            
+            agent.model.set_weights(new_weights)
+            agent.epsilon = min(agent.epsilon * 1.5, 0.8)  # Aumenta exploração
+        except Exception as e:
+            logger.error(f"Erro no reset do DQN: {e}")
+
+def update_feature_stats(history):
+    """Atualiza estatísticas das features com dados reais"""
+    if len(history) < SEQUENCE_LEN * 2:
+        return
+    
+    # Calcula estatísticas reais dos últimos dados
+    features_list = []
+    for i in range(SEQUENCE_LEN, len(history)):
+        seq_slice = history[i-SEQUENCE_LEN:i]
+        feat = get_advanced_features(seq_slice, None, None)  # Sem normalização
+        features_list.append(feat)
+    
+    if features_list:
+        features_array = np.array(features_list)
+        st.session_state.feat_stats = {
+            'means': np.mean(features_array, axis=0),
+            'stds': np.std(features_array, axis=0)
+        }
+
+def adaptive_confidence_filter(probabilities, q_values, history_length):
+    """Ajusta o limiar de confiança baseado na experiência"""
+    # Limiar mais conservador no início, mais agressivo com experiência
+    if history_length < 100:
+        threshold = 0.7
+    elif history_length < 500:
+        threshold = 0.6
+    elif history_length < 1000:
+        threshold = 0.5
+    else:
+        threshold = 0.4
+    
+    score = 0.6 * np.array(probabilities) + 0.4 * np.array(q_values)
+    return np.where(score >= threshold)[0].tolist()
+
+def regime_change_detection(history, window=100):
+    """Detecta mudanças fundamentais no comportamento da roleta"""
+    if len(history) < window * 2:
+        return False
+    
+    recent = history[-window:]
+    older = history[-window*2:-window]
+    
+    # Teste estatístico para mudança de distribuição
+    _, p_value = stats.ks_2samp(recent, older)
+    
+    # Teste de entropia
+    recent_entropy = stats.entropy(np.bincount(recent, minlength=37))
+    older_entropy = stats.entropy(np.bincount(older, minlength=37))
+    
+    return p_value < 0.01 or abs(recent_entropy - older_entropy) > 0.5
+
+def smart_betting_strategy(predictions, bankroll, recent_performance):
+    """Estratégia de apostas baseada em múltiplos fatores"""
+    if not predictions or 'top_numbers' not in predictions:
+        return [(random.randint(0, 36), bankroll * 0.01)]
+    
+    top_numbers = [n for n, _ in predictions['top_numbers']]
+    probabilities = predictions['num_probs']
+    
+    # Aposta principal nos números mais prováveis
+    main_bets = []
+    for i, number in enumerate(top_numbers[:3]):
+        bet_amount = bankroll * 0.02 * probabilities[number]  # 2% do bankroll ajustado pela confiança
+        main_bets.append((number, bet_amount))
+    
+    # Apostas de proteção em vizinhos
+    protection_bets = []
+    for number in top_numbers:
+        neighbors = optimal_neighbors(number)
+        for neighbor in neighbors:
+            if neighbor not in top_numbers:
+                bet_amount = bankroll * 0.005  # 0.5% do bankroll
+                protection_bets.append((neighbor, bet_amount))
+    
+    return main_bets + protection_bets
+
+def live_performance_monitoring():
+    """Dashboard avançado de performance"""
+    st.sidebar.markdown("### 📈 Live Analytics")
+    
+    # Heatmap de acertos
+    hit_map = np.zeros(37)
+    for i, number in enumerate(st.session_state.history):
+        if i > 0 and st.session_state.prev_actions and number in st.session_state.prev_actions:
+            hit_map[number] += 1
+    
+    # Visualização do heatmap
+    if np.sum(hit_map) > 0:
+        fig, ax = plt.subplots(figsize=(10, 2))
+        ax.imshow(hit_map.reshape(1, 37), cmap='hot', aspect='auto')
+        ax.set_xticks(range(0, 37, 5))
+        ax.set_xticklabels(range(0, 37, 5))
+        ax.set_yticks([])
+        ax.set_title('Heatmap de Acertos')
+        st.sidebar.pyplot(fig)
+    
+    # Alertas de oportunidade
+    if st.session_state.lstm_predictions and 'num_probs' in st.session_state.lstm_predictions:
+        current_confidence = np.max(st.session_state.lstm_predictions['num_probs']) 
+        if current_confidence > 0.7:
+            st.sidebar.success("🎯 ALTA CONFIANÇA - Aumente apostas!")
+        elif current_confidence < 0.3:
+            st.sidebar.warning("⚠️ BAIXA CONFIANÇA - Reduza apostas!")
+
+# --- AUX FUNCTIONS ORIGINAIS ---
+def number_to_color(n):
+    if n == 0:
+        return 0  # zero
+    return 1 if n in RED_NUMBERS else 2  # 1=red,2=black
+
+def number_to_dozen(n):
+    if n == 0:
+        return 0  # zero
+    if 1 <= n <= 12:
+        return 1
+    if 13 <= n <= 24:
+        return 2
+    return 3
+
+def number_to_region(n):
+    """Retorna o índice da primeira região que o número pertence.
+    Retorna -1 se não pertencer a nenhuma região definida."""
+    for i, region_name in enumerate(REGIONS):
+        if n in REGIONS[region_name]:
+            return i
+    return -1
+    
+def get_advanced_features(sequence, feat_means=None, feat_stds=None):
+    # Inicializa todas as 12 features com zeros
+    features = np.zeros(12)
+    
+    if sequence is None or len(sequence) < 2:
+        if feat_means is not None and feat_stds is not None:
+            features = (features - feat_means) / (feat_stds + 1e-6)
+        return features
+    
+    seq = np.array(sequence)
+    
+    # 1. Média e Desvio Padrão
+    mean = np.mean(seq) / 36.0
+    std = np.std(seq) / 18.0
+    
+    # 2. Velocidade e desaceleração da roda
+    last = int(sequence[-1])
+    second_last = int(sequence[-2])
+    if last in WHEEL_ORDER and second_last in WHEEL_ORDER:
+        last_pos = WHEEL_ORDER.index(last)
+        second_last_pos = WHEEL_ORDER.index(second_last)
+        wheel_speed = (last_pos - second_last_pos) % 37
+        if len(sequence) > 2 and sequence[-3] in WHEEL_ORDER:
+            third_pos = WHEEL_ORDER.index(sequence[-3])
+            prev_speed = (second_last_pos - third_pos) % 37
+            deceleration = abs(wheel_speed - prev_speed)
+        else:
+            deceleration = 0.0
+    else:
+        wheel_speed = 0.0
+        deceleration = 0.0
+        
+    wheel_speed /= 36.0
+    deceleration /= 36.0
+
+    # 3. Frequências e repetições
+    freq = Counter(sequence)
+    hot_number_count = max(freq.values()) if freq else 1
+    cold_number_count = min(freq.values()) if freq else 0
+    
+    last_freq_norm = freq.get(last, 0) / hot_number_count if hot_number_count > 0 else 0.0
+    freq_range_norm = (hot_number_count - cold_number_count) / len(sequence) if len(sequence) > 0 else 0.0
+    unique_ratio = len(freq) / len(sequence) if len(sequence) > 0 else 0.0
+    is_repeat = 1.0 if last == second_last else 0.0
+
+    # Preenche as primeiras 8 features
+    features[:8] = np.array([
+        mean, std, wheel_speed, deceleration,
+        last_freq_norm, freq_range_norm, unique_ratio, is_repeat
+    ])
+
+    # ✅ NOVAS FEATURES DE ALTA IMPACTÂNCIA (últimas 4 features)
+    if len(sequence) >= 5:
+        # 1. Tendência de direção da roda (clockwise vs counter-clockwise)
+        last_5 = sequence[-5:]
+        wheel_positions = [WHEEL_ORDER.index(n) if n in WHEEL_ORDER else 0 for n in last_5]
+        direction_changes = 0
+        for i in range(1, len(wheel_positions)):
+            diff = (wheel_positions[i] - wheel_positions[i-1]) % 37
+            if diff > 18:  # Movimento anti-horário
+                direction_changes += 1
+        clockwise_ratio = direction_changes / 4.0
+        
+        # 2. Padrão de repetição de cor
+        color_changes = sum(1 for i in range(1, len(last_5)) 
+                         if number_to_color(last_5[i]) != number_to_color(last_5[i-1]))
+        color_volatility = color_changes / 4.0
+        
+        # 3. Momentum de números quentes
+        recent_counts = Counter(sequence[-10:] if len(sequence) >= 10 else sequence)
+        hot_momentum = max(recent_counts.values()) / len(recent_counts) if recent_counts else 0
+        
+        # 4. Distância média entre números consecutivos
+        if len(sequence) >= 3:
+            distances = []
+            for i in range(1, min(6, len(sequence))):
+                if sequence[-i] in WHEEL_ORDER and sequence[-(i+1)] in WHEEL_ORDER:
+                    pos1 = WHEEL_ORDER.index(sequence[-i])
+                    pos2 = WHEEL_ORDER.index(sequence[-(i+1)])
+                    dist = min(abs(pos1 - pos2), 37 - abs(pos1 - pos2))
+                    distances.append(dist)
+            avg_distance = np.mean(distances) / 18.0 if distances else 0.5
+        else:
+            avg_distance = 0.5
+            
+        # Preenche as últimas 4 features
+        features[8:12] = np.array([clockwise_ratio, color_volatility, hot_momentum, avg_distance])
+    
+    # Adiciona features de física
+    physics_features = physics_informed_features(sequence)
+    features = np.concatenate([features, physics_features])
+    
+    # Normalização usando as estatísticas fornecidas
+    if feat_means is not None and feat_stds is not None:
+        features = (features - feat_means) / (feat_stds + 1e-6)
+    
+    return features
+
+def update_co_occurrence_matrix(matrix, history):
+    if len(history) >= 2:
+        prev_num = history[-2]
+        curr_num = history[-1]
+        if 0 <= prev_num < NUM_TOTAL and 0 <= curr_num < NUM_TOTAL:
+            matrix[prev_num][curr_num] += 1
+    return matrix
+
+def sequence_to_one_hot(sequence):
+    seq = list(sequence[-SEQUENCE_LEN:]) if sequence else []
+    pad = [-1] * max(0, (SEQUENCE_LEN - len(seq)))
+    seq_padded = pad + seq
+    one_hot_seq = []
+    for x in seq_padded:
+        if x in WHEEL_ORDER:
+            pos = WHEEL_ORDER.index(x)
+            one_hot_seq.append(to_categorical(pos, NUM_TOTAL))
+        else:
+            one_hot_seq.append(np.zeros(NUM_TOTAL))
+    return np.array(one_hot_seq)
+
+# Flag para alternar entre LSTM puro e híbrido
+USE_LSTM_ONLY = False
+
+def sequence_to_state(sequence, model=None, feat_means=None, feat_stds=None):
+    seq_slice = sequence[-SEQUENCE_LEN:] if sequence else []
+    
+    features = get_advanced_features(seq_slice, feat_means, feat_stds)
+    one_hot_seq = sequence_to_one_hot(seq_slice)
+
+    # ✅ INICIALIZE TODAS AS VARIÁVEIS ANTES DO BLOCO IF
+    num_probs = np.zeros(NUM_TOTAL)
+    color_probs = np.zeros(3)
+    dozen_probs = np.zeros(4)
+    neighbors_probs = np.zeros(NUM_TOTAL)
+    regions_probs = np.zeros(len(REGIONS))
+    eohl_probs = np.zeros(4)
+    entropy_vector = np.array([0.0])
+    
+    if model is not None and len(sequence) >= SEQUENCE_LEN:
+        try:
+            seq_arr = np.expand_dims(one_hot_seq, axis=0)
+            feat_arr = np.array([features])
+            raw = model.predict([seq_arr, feat_arr], verbose=0)
+            
+            if isinstance(raw, list) and len(raw) >= 6:
+                num_probs = np.array(raw[0][0])
+                entropy = -np.sum(num_probs * np.log(num_probs + 1e-9))
+                entropy_norm = entropy / np.log(len(num_probs))
+                entropy_vector = np.array([entropy_norm])
+                color_probs = np.array(raw[1][0])
+                dozen_probs = np.array(raw[2][0])    
+                neighbors_probs = np.array(raw[3][0])
+                regions_probs = np.array(raw[4][0])
+                eohl_probs = np.array(raw[5][0])
+            else:
+                num_probs = np.array(raw)[0]
+        except Exception:
+            pass
+        
+        entropy = -np.sum(num_probs * np.log(num_probs + 1e-9))
+        entropy_norm = entropy / np.log(len(num_probs))
+        entropy_vector = np.array([entropy_norm])
+
+    # ... (resto da função permanece igual) ...
+    # [Manter o restante da função sequence_to_state original]
+
+# ... (manter todas as outras funções originais) ...
+
+# =========================
+# RECOMPENSA REVISADA
+# =========================
+def compute_reward(action_numbers, outcome_number, lstm_sugestoes=None,
+                   bet_amount=BASE_BET_AMOUNT,
+                   max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD):
+
+    action_numbers = set([a for a in action_numbers if 0 <= a <= 36])
+
+    # 1. ✅ PRIMEIRO VERIFICA ACERTOS
+    acertos_exatos = [a for a in action_numbers if a == outcome_number]
+    acertos_vizinhos = []
+    for a in action_numbers:
+        vizinhos = optimal_neighbors(a, max_neighbors=max_neighbors_for_reward)
+        if outcome_number in vizinhos:
+            acertos_vizinhos.append(a)
+
+    # 2. ✅ BASE REWARD: Só recompensa se houve acerto
+    reward = 0.0
+    if acertos_exatos or acertos_vizinhos:
+        # ✅ Recompensa por acertos (VALORES REVISADOS)
+        reward += len(acertos_exatos) * REWARD_EXACT
+        reward += len(acertos_vizinhos) * REWARD_NEIGHBOR
+        
+        # ✅ Bônus por múltiplos acertos
+        if len(acertos_exatos) + len(acertos_vizinhos) >= 3:
+            reward += 2.0
+
+        # ✅ Bônus por streak
+        if st.session_state.stats.get('streak', 0) >= 3:
+            reward += 1.0
+            
+        # ✅ Bônus se DQN acertar sem ajuda do LSTM
+        bonus_superacao = 0.0
+        if lstm_sugestoes:
+            lstm_set = set(lstm_sugestoes)
+            dqn_set = set(action_numbers)
+            if outcome_number in dqn_set and outcome_number not in lstm_set:
+                bonus_superacao = 2.0
+        reward += bonus_superacao
+        
+    else:
+        # ❌ PENALIDADE por NÃO acertar (VALOR REVISADO)
+        reward += REWARD_LOSS
+
+    # 3. ✅ Penalidades (aplicam independente de acerto)
+    bet_penalty = 0.05 * len(action_numbers)  # Reduzido de 0.1 para 0.05
+    reward -= bet_penalty
+
+    # Penalidade por apostas amplas
+    if len(action_numbers) > 10:
+        reward -= 1.0
+
+    return reward * bet_amount, acertos_exatos, acertos_vizinhos
+
+# =========================
+# MODELO LSTM ATUALIZADO
+# =========================
+def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
+    seq_input = Input(shape=(seq_len, num_total), name='sequence_input')
+
+    # ✅ REGULARIZAÇÃO ADAPTATIVA
+    reg_params = adaptive_regularization(0)
+    
+    # ✅ CAPACIDADE AUMENTADA COM REGULARIZAÇÃO
+    x = Bidirectional(LSTM(192, return_sequences=True, 
+                         kernel_regularizer=l2(reg_params['l2'])))(seq_input)
+    x = BatchNormalization()(x)
+    x = Dropout(reg_params['dropout'])(x)
+
+    x = Bidirectional(LSTM(144, return_sequences=True, 
+                         kernel_regularizer=l2(reg_params['l2'])))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(reg_params['dropout'])(x)
+
+    x = Bidirectional(LSTM(96, return_sequences=True, 
+                         kernel_regularizer=l2(reg_params['l2'])))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(reg_params['dropout'])(x)
+
+    # ✅ CNN MELHORADA
+    cnn_branch = Conv1D(96, kernel_size=2, activation='relu', padding='same')(x)
+    cnn_branch = Conv1D(64, kernel_size=3, activation='relu', padding='same')(cnn_branch)
+    cnn_branch = GlobalMaxPooling1D()(cnn_branch)
+
+    # ✅ TRANSFORMER ATTENTION
+    attention = MultiHeadAttention(num_heads=4, key_dim=64)(x, x)
+    attention = LayerNormalization()(attention + x)
+    attention = LSTM(80, return_sequences=False)(attention)
+
+    # ✅ COMBINAÇÃO MAIS INTELIGENTE
+    combined = Concatenate()([cnn_branch, attention])
+    
+    # ✅ DEEP DENSE NETWORK
+    x = Dense(256, activation='swish')(combined)
+    x = BatchNormalization()(x)
+    x = Dropout(reg_params['dropout'])(x)
+    
+    x = Dense(192, activation='swish')(x)
+    x = BatchNormalization()(x)
+    x = Dropout(reg_params['dropout'])(x)
+    
+    x = Dense(128, activation='swish')(x)
+    x = BatchNormalization()(x)
+    x = Dropout(reg_params['dropout'])(x)
+
+    # ✅ FEATURES PROCESSING
+    feat_input = Input(shape=(12,), name='features_input')
+    feat_dense = Dense(64, activation='swish')(feat_input)
+    feat_dense = BatchNormalization()(feat_dense)
+    feat_dense = Dropout(0.3)(feat_dense)
+    
+    feat_dense = Dense(32, activation='swish')(feat_dense)
+    feat_dense = BatchNormalization()(feat_dense)
+    feat_dense = Dropout(0.2)(feat_dense)
+
+    # ✅ FUSÃO FINAL
+    merged = Concatenate()([x, feat_dense])
+    
+    # Output layers
+    out_num = Dense(num_total, activation='softmax', name='num_out')(merged)
+    out_color = Dense(3, activation='softmax', name='color_out')(merged)
+    out_dozen = Dense(4, activation='softmax', name='dozen_out')(merged)
+    out_neighbors = Dense(num_total, activation='softmax', name='neighbors_out')(merged)
+    out_regions = Dense(len(REGIONS), activation='softmax', name='regions_out')(merged)
+    out_even_odd_high_low = Dense(4, activation='softmax', name='eohl_out')(merged)
+
+    model = Model(inputs=[seq_input, feat_input],
+                  outputs=[out_num, out_color, out_dozen, out_neighbors, out_regions, out_even_odd_high_low])
+    
+    # ✅ OPTIMIZER MAIS EFICIENTE
+    optimizer = Nadam(learning_rate=7e-4)
+    
+    model.compile(optimizer=optimizer,
+                  loss={'num_out': 'categorical_crossentropy',
+                        'color_out': 'categorical_crossentropy',
+                        'dozen_out': 'categorical_crossentropy',
+                        'neighbors_out': 'categorical_crossentropy',
+                        'regions_out': 'categorical_crossentropy',
+                        'eohl_out': 'categorical_crossentropy'},
+                  loss_weights={'num_out': 2.0, 'color_out': 0.3, 'dozen_out': 0.3, 
+                               'neighbors_out': 1.2, 'regions_out': 0.6, 'eohl_out': 0.4},
+                  metrics={'num_out': 'accuracy'})
+    
+    return model
+
+# ... (manter o restante das funções originais) ...
+
+# =========================
+# INTERFACE STREAMLIT ATUALIZADA
+# =========================
+st.set_page_config(layout="wide")
+st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (ULTRA REVISADO)")
+
+# Sidebar com analytics
+live_performance_monitoring()
+
+# ... (manter o restante da interface, mas adicionar as melhorias) ...
+
+# No processamento do novo número, ADICIONAR:
+if st.session_state.last_input is not None:
+    try:
+        num = int(st.session_state.last_input)
+        
+        # ✅ ATUALIZA ESTATÍSTICAS COM DADOS REAIS
+        update_feature_stats(st.session_state.history)
+        
+        # ✅ DETECTA MUDANÇAS DE PADRÃO
+        pattern_change = detect_pattern_change(st.session_state.history)
+        regime_change = regime_change_detection(st.session_state.history)
+        
+        if (pattern_change or regime_change) and st.session_state.dqn_agent:
+            conditional_dqn_reset(st.session_state.dqn_agent, True)
+            st.session_state.performance_metrics['regime_change_detected'] = True
+            logger.info("🚨 Mudança de padrão detectada - DQN resetado")
+        
+        # ... (resto do processamento) ...
+
+# ... (no final, adicionar nova seção de gerenciamento de banca) ...
+
+st.sidebar.markdown("### 💰 Gerenciamento de Banca")
+st.sidebar.write(f"Bankroll atual: ${st.session_state.bankroll:.2f}")
+
+if st.session_state.lstm_predictions and 'num_probs' in st.session_state.lstm_predictions:
+    confidence = np.max(st.session_state.lstm_predictions['num_probs'])
+    recommended_bet = money_management_system(
+        st.session_state.bankroll, 
+        st.session_state.recent_bets, 
+        confidence
+    )
+    st.sidebar.write(f"Aposta recomendada: ${recommended_bet:.2f}")
+    st.sidebar.write(f"Confiança: {confidence:.2%}")
+
+# ... (manter o restante do código) ...
 
 # --- AUX FUNCTIONS ---
 def number_to_color(n):
@@ -1576,6 +2174,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
