@@ -1154,10 +1154,15 @@ with st.form("num_form", clear_on_submit=True):
     if submitted:
         st.session_state.last_input = int(num_input)
 
-# Processa quando o usuário informa o último número
+# Processa quando o usuário informa o último número (APENAS UMA VEZ)
 if st.session_state.last_input is not None:
     try:
         num = int(st.session_state.last_input)
+        
+        # 🔥 CORREÇÃO CRÍTICA: Reseta imediatamente para evitar loop infinito
+        st.session_state.last_input = None
+        st.session_state.should_process = True  # Flag para processamento único
+        st.session_state.current_num = num  # Salva o número atual para uso posterior
 
         # Checa acurácia das previsões anteriores (Top-N)
         if 'lstm_predictions' in st.session_state and st.session_state.lstm_predictions:
@@ -1180,18 +1185,10 @@ if st.session_state.last_input is not None:
         # Avalia a previsão da rodada
         st.session_state.stats = avaliar_previsao(apostas_final, num, st.session_state.stats)
 
-        # Exibe painel de métricas
-        st.markdown("### 📊 Métricas de Acurácia")
-        st.write(f"Total de rodadas: {st.session_state.stats['rodadas']}")
-        st.write(f"Total de acertos: {st.session_state.stats['acertos']}")
-        st.write(f"Top‑1: {st.session_state.stats['top1']} acertos")
-        st.write(f"Top‑3: {st.session_state.stats['top3']} acertos")
-        st.write(f"Top‑5: {st.session_state.stats['top5']} acertos")
-
     except Exception as e:
         logger.error(f"Erro ao processar entrada: {e}")
 
-# Inicializa DQN se ainda não existir
+# Inicializa DQN se ainda não existir (executa apenas uma vez)
 if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUENCE_LEN:
     exemplo_estado = sequence_to_state(
         st.session_state.history,
@@ -1205,72 +1202,85 @@ if st.session_state.dqn_agent is None and len(st.session_state.history) >= SEQUE
             action_size=NUM_TOTAL
         )
 
-# Reforço com resultado anterior
-recompensa = 0.0
-acertos_exatos = []
-acertos_vizinhos = []
+# 🔥 NOVO: Só processa recompensa e treinamento se houve novo número
+if getattr(st.session_state, 'should_process', False) and hasattr(st.session_state, 'current_num'):
+    # Reforço com resultado anterior
+    recompensa = 0.0
+    acertos_exatos = []
+    acertos_vizinhos = []
 
-if st.session_state.prev_state is not None and st.session_state.prev_actions is not None:
-    # ✅ CORREÇÃO: Verificar se lstm_predictions existe antes de acessar
-    lstm_sugestoes = None
-    if hasattr(st.session_state, 'lstm_predictions') and st.session_state.lstm_predictions:
-        lstm_sugestoes = [n for n, _ in st.session_state.lstm_predictions]
-    
-    recompensa, acertos_exatos, acertos_vizinhos = compute_reward(
-        st.session_state.prev_actions,
-        num,
-        lstm_sugestoes=lstm_sugestoes,
-        bet_amount=BET_AMOUNT,
-        max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD
-    )
-    logger.info(f"Número sorteado: {num} | Apostas feitas: {st.session_state.prev_actions} | Acerto direto: {num in st.session_state.prev_actions}")
-
-    proximo_estado = sequence_to_state(
-        st.session_state.history,
-        st.session_state.model,
-        st.session_state.feat_stats['means'],
-        st.session_state.feat_stats['stds']
-    )
-
-    if st.session_state.dqn_agent is not None:
-        st.session_state.dqn_agent.remember(
-            st.session_state.prev_state,
+    if st.session_state.prev_state is not None and st.session_state.prev_actions is not None:
+        # ✅ CORREÇÃO: Verificar se lstm_predictions existe antes de acessar
+        lstm_sugestoes = None
+        if hasattr(st.session_state, 'lstm_predictions') and st.session_state.lstm_predictions:
+            lstm_sugestoes = [n for n, _ in st.session_state.lstm_predictions]
+        
+        recompensa, acertos_exatos, acertos_vizinhos = compute_reward(
             st.session_state.prev_actions,
-            recompensa,
-            proximo_estado,
-            False
+            st.session_state.current_num,
+            lstm_sugestoes=lstm_sugestoes,
+            bet_amount=BET_AMOUNT,
+            max_neighbors_for_reward=NEIGHBOR_RADIUS_FOR_REWARD
+        )
+        logger.info(f"Número sorteado: {st.session_state.current_num} | Apostas feitas: {st.session_state.prev_actions} | Acerto direto: {st.session_state.current_num in st.session_state.prev_actions}")
+
+        proximo_estado = sequence_to_state(
+            st.session_state.history,
+            st.session_state.model,
+            st.session_state.feat_stats['means'],
+            st.session_state.feat_stats['stds']
         )
 
-# Atualiza estatísticas
-st.session_state.stats['bets'] += 1
-st.session_state.stats['profit'] += recompensa
-if recompensa > 0:
-    st.session_state.stats['wins'] += 1
-    st.session_state.stats['streak'] += 1
-    st.session_state.stats['max_streak'] = max(st.session_state.stats['max_streak'], st.session_state.stats['streak'])
-else:
-    st.session_state.stats['streak'] = 0
+        if st.session_state.dqn_agent is not None:
+            st.session_state.dqn_agent.remember(
+                st.session_state.prev_state,
+                st.session_state.prev_actions,
+                recompensa,
+                proximo_estado,
+                False
+            )
 
-st.session_state.step_count += 1
-if st.session_state.dqn_agent is not None:
-    st.session_state.dqn_agent.replay(REPLAY_BATCH)
-if st.session_state.dqn_agent is not None and st.session_state.step_count % TARGET_UPDATE_FREQ == 0:
-    st.session_state.dqn_agent.update_target()
+    # Atualiza estatísticas
+    st.session_state.stats['bets'] += 1
+    st.session_state.stats['profit'] += recompensa
+    if recompensa > 0:
+        st.session_state.stats['wins'] += 1
+        st.session_state.stats['streak'] += 1
+        st.session_state.stats['max_streak'] = max(st.session_state.stats['max_streak'], st.session_state.stats['streak'])
+    else:
+        st.session_state.stats['streak'] = 0
 
-# Inicializa e treina LSTM se já houver dados suficientes
-if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
-    st.session_state.model = build_deep_learning_model()
-    
-if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN * 2:
-    train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
-    st.session_state.prev_state = sequence_to_state(
-        st.session_state.history, 
-        st.session_state.model,
-        st.session_state.feat_stats['means'],
-        st.session_state.feat_stats['stds']
-    )
+    st.session_state.step_count += 1
+    if st.session_state.dqn_agent is not None:
+        st.session_state.dqn_agent.replay(REPLAY_BATCH)
+    if st.session_state.dqn_agent is not None and st.session_state.step_count % TARGET_UPDATE_FREQ == 0:
+        st.session_state.dqn_agent.update_target()
 
-# Define ações sugeridas
+    # Inicializa e treina LSTM se já houver dados suficientes
+    if st.session_state.model is None and len(st.session_state.history) >= SEQUENCE_LEN * 2:
+        st.session_state.model = build_deep_learning_model()
+        
+    if st.session_state.model is not None and len(st.session_state.history) > SEQUENCE_LEN * 2:
+        train_lstm_on_recent_minibatch(st.session_state.model, st.session_state.history)
+        st.session_state.prev_state = sequence_to_state(
+            st.session_state.history, 
+            st.session_state.model,
+            st.session_state.feat_stats['means'],
+            st.session_state.feat_stats['stds']
+        )
+
+    # 🔥 RESETA a flag de processamento
+    st.session_state.should_process = False
+
+# Exibe painel de métricas (sempre visível)
+st.markdown("### 📊 Métricas de Acurácia")
+st.write(f"Total de rodadas: {st.session_state.stats['rodadas']}")
+st.write(f"Total de acertos: {st.session_state.stats['acertos']}")
+st.write(f"Top‑1: {st.session_state.stats['top1']} acertos")
+st.write(f"Top‑3: {st.session_state.stats['top3']} acertos")
+st.write(f"Top‑5: {st.session_state.stats['top5']} acertos")
+
+# Define ações sugeridas (sempre executa, mas não causa loop)
 if USE_LSTM_ONLY and st.session_state.model is not None:
     pred_info = predict_next_numbers(st.session_state.model, st.session_state.history, top_k=3)
     acoes_sugeridas = [n for n, _ in pred_info['top_numbers']] if pred_info else random.sample(range(NUM_TOTAL), 3)
@@ -1355,38 +1365,6 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
