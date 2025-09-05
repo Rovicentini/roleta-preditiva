@@ -5,6 +5,7 @@ import streamlit as st
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Dropout, Attention, BatchNormalization, Conv1D, GlobalMaxPooling1D
 from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Dropout, Attention, BatchNormalization
 from tensorflow.keras.optimizers import Nadam, Adam
 from tensorflow.keras.regularizers import l2
@@ -16,8 +17,6 @@ from tensorflow.keras import backend as K
 from collections import Counter, deque
 import random
 import logging
-
-
 import json
 
 def log_dqn_step(episode, step, state, action, reward, q_values, epsilon, loss=None):
@@ -1576,6 +1575,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
