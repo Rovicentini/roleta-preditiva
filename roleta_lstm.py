@@ -103,8 +103,8 @@ if 'top_n_metrics' not in st.session_state:
 if 'feat_stats' not in st.session_state:
     # Exemplo de valores. SUBSTITUA POR ESTATÍSTICAS REAIS DO SEU HISTÓRICO.
     st.session_state.feat_stats = {
-        'means': np.array([0.5, 0.25, 0.5, 0.2, 0.5, 0.5, 0.5, 0.1]),
-        'stds': np.array([0.2, 0.1, 0.2, 0.1, 0.1, 0.1, 0.1, 0.05])
+        'means': np.array([0.5, 0.25, 0.5, 0.2, 0.5, 0.5, 0.5, 0.1, 0.5, 0.5, 0.5, 0.5]),
+        'stds': np.array([0.2, 0.1, 0.2, 0.1, 0.1, 0.1, 0.1, 0.05, 0.2, 0.2, 0.2, 0.2])
     }
 
 # --- CONSTANTS ---
@@ -773,7 +773,7 @@ if len(history) >= window_size:
         # Penalizar números saturados (evitar overfitting)
         if recent_count.get(num, 0) >= window_size//2:
             weighted[num] *= 0.6    
-    weighted /= weighted.sum()
+weighted /= weighted.sum()
 
     top_indices = list(np.argsort(weighted)[-top_k:][::-1])
     color_pred = int(np.argmax(color_probs))
@@ -1240,18 +1240,18 @@ if st.button("Adicionar histórico"):
                     top_k=3
                 )
     # 5) TREINO DQN SUPER INTENSIVO
-with st.spinner("Treino DQN intensivo..."):
-    for i in range(80):  # ↑ 80 iterações
-        loss = st.session_state.dqn_agent.replay(REPLAY_BATCH)
-        if i % 20 == 0 and loss is not None:
-            logger.info(f"DQN Iter {i}: Loss={loss:.4f}, Eps={st.session_state.dqn_agent.epsilon:.3f}")
+                with st.spinner("Treino DQN intensivo..."):
+                    for i in range(80):  # ↑ 80 iterações
+                        loss = st.session_state.dqn_agent.replay(REPLAY_BATCH)
+                        if i % 20 == 0 and loss is not None:
+                            logger.info(f"DQN Iter {i}: Loss={loss:.4f}, Eps={st.session_state.dqn_agent.epsilon:.3f}")
     
-    # ✅ DOUBLE UPDATE para estabilidade
-    st.session_state.dqn_agent.update_target()
-    st.session_state.dqn_agent.update_target()
+                    # ✅ DOUBLE UPDATE para estabilidade
+                    st.session_state.dqn_agent.update_target()
+                    st.session_state.dqn_agent.update_target()
     
     # ✅ RESET inteligente do epsilon
-    st.session_state.dqn_agent.epsilon = max(EPSILON_MIN, 
+                    st.session_state.dqn_agent.epsilon = max(EPSILON_MIN, 
                                            st.session_state.dqn_agent.epsilon * 0.7)
                 st.success("DQN pré-treinado com o histórico.")
 # Opcional: Atualiza prev_state para próxima decisão já usar o modelo afinado
@@ -1569,6 +1569,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
