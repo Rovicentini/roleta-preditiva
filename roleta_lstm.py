@@ -113,12 +113,12 @@ SEQUENCE_LEN = 20
 BET_AMOUNT = 1.0
 
 # Replay/treino DQN
-TARGET_UPDATE_FREQ = 35
-REPLAY_BATCH = 300
-REPLAY_SIZE = 8000
-DQN_TRAIN_EVERY = 5
-DQN_LEARNING_RATE = 1e-3
-DQN_GAMMA = 0.40
+TARGET_UPDATE_FREQ = 25
+REPLAY_BATCH = 384
+REPLAY_SIZE = 10000
+DQN_TRAIN_EVERY = 3
+DQN_LEARNING_RATE = 8e-4
+DQN_GAMMA = 0.45
 
 # Recompensa (shaping)
 REWARD_EXACT = 35.0
@@ -131,9 +131,9 @@ NEIGHBOR_RADIUS_FOR_REWARD = 3
 # Treino LSTM incremental
 LSTM_RECENT_WINDOWS = 100
 # CORREÇÃO: não referenciar variável inexistente 'history'
-LSTM_BATCH_SAMPLES = 256
-LSTM_EPOCHS_PER_STEP = 5
-LSTM_BATCH_SIZE = 32
+LSTM_BATCH_SAMPLES = 384
+LSTM_EPOCHS_PER_STEP = 6
+LSTM_BATCH_SIZE = 48
 
 # Hiperparâmetros DQN (exploração)
 def get_training_params(history_length):
@@ -149,8 +149,8 @@ def get_training_params(history_length):
         return 30, 256
 
 EPSILON_START = 1.0
-EPSILON_MIN = 0.05
-EPSILON_DECAY = 0.995
+EPSILON_MIN = 0.02
+EPSILON_DECAY = 0.997
 # Limiar de confiança para sugerir aposta
 CONFIDENCE_THRESHOLD = 0.1
 
@@ -251,6 +251,44 @@ def get_advanced_features(sequence, feat_means=None, feat_stds=None):
     # MUDANÇA: Normalização usando as estatísticas fornecidas
     if feat_means is not None and feat_stds is not None:
         features = (features - feat_means) / (feat_stds + 1e-6) # Adiciona epsilon para evitar divisão por zero
+     # ✅ NOVAS FEATURES DE ALTA IMPACTÂNCIA
+    if len(sequence) >= 5:
+        # 1. Tendência de direção da roda (clockwise vs counter-clockwise)
+        last_5 = sequence[-5:]
+        wheel_positions = [WHEEL_ORDER.index(n) if n in WHEEL_ORDER else 0 for n in last_5]
+        direction_changes = 0
+        for i in range(1, len(wheel_positions)):
+            diff = (wheel_positions[i] - wheel_positions[i-1]) % 37
+            if diff > 18:  # Movimento anti-horário
+                direction_changes += 1
+        clockwise_ratio = direction_changes / 4.0
+        
+        # 2. Padrão de repetição de cor
+        color_changes = sum(1 for i in range(1, len(last_5)) 
+                         if number_to_color(last_5[i]) != number_to_color(last_5[i-1]))
+        color_volatility = color_changes / 4.0
+        
+        # 3. Momentum de números quentes
+        recent_counts = Counter(sequence[-10:] if len(sequence) >= 10 else sequence)
+        hot_momentum = max(recent_counts.values()) / len(recent_counts) if recent_counts else 0
+        
+        # 4. Distância média entre números consecutivos
+        if len(sequence) >= 3:
+            distances = []
+            for i in range(1, min(6, len(sequence))):
+                if sequence[-i] in WHEEL_ORDER and sequence[-(i+1)] in WHEEL_ORDER:
+                    pos1 = WHEEL_ORDER.index(sequence[-i])
+                    pos2 = WHEEL_ORDER.index(sequence[-(i+1)])
+                    dist = min(abs(pos1 - pos2), 37 - abs(pos1 - pos2))
+                    distances.append(dist)
+            avg_distance = np.mean(distances) / 18.0 if distances else 0.5
+        else:
+            avg_distance = 0.5
+            
+        features = np.concatenate([
+            features,
+            np.array([clockwise_ratio, color_volatility, hot_momentum, avg_distance])
+        ])    
     
     return features
 
@@ -496,52 +534,70 @@ def filtrar_apostas_por_confianca(probabilidades, q_values, freq_vector,
 def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     seq_input = Input(shape=(seq_len, num_total), name='sequence_input')
 
-    # Bidirecional + BN + Dropout
-    x = Bidirectional(LSTM(128, return_sequences=True, kernel_regularizer=l2(1e-4)))(seq_input)
+    # ✅ CAPACIDADE AUMENTADA
+    x = Bidirectional(LSTM(192, return_sequences=True, kernel_regularizer=l2(1e-4)))(seq_input)
     x = BatchNormalization()(x)
-    x = Dropout(0.3)(x)
+    x = Dropout(0.4)(x)
 
-    # LSTM bidirecional
+    x = Bidirectional(LSTM(144, return_sequences=True, kernel_regularizer=l2(1e-4)))(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.5)(x)
+
     x = Bidirectional(LSTM(96, return_sequences=True, kernel_regularizer=l2(1e-4)))(x)
     x = BatchNormalization()(x)
     x = Dropout(0.5)(x)
 
-# CNN para padrões locais
-    from tensorflow.keras.layers import Conv1D, GlobalMaxPooling1D
-    cnn_out = Conv1D(64, kernel_size=3, activation='relu', padding='same')(x)
-    cnn_out = GlobalMaxPooling1D()(cnn_out)
+    # ✅ CNN MELHORADA
+    cnn_branch = Conv1D(96, kernel_size=2, activation='relu', padding='same')(x)
+    cnn_branch = Conv1D(64, kernel_size=3, activation='relu', padding='same')(cnn_branch)
+    cnn_branch = GlobalMaxPooling1D()(cnn_branch)
 
+    # ✅ ATTENTION OTIMIZADA
+    attention = Attention(use_scale=True, name="self_attention")([x, x])
+    attention = LSTM(80, return_sequences=False)(attention)
+
+    # ✅ COMBINAÇÃO MAIS INTELIGENTE
+    combined = Concatenate()([cnn_branch, attention])
     
-    x_att = Attention(name="self_attention")([x, x])
-    x_att = LSTM(64, return_sequences=False)(x_att)
-
-# Combina CNN + LSTM final
-    x = Concatenate()([cnn_out, x_att])
-
+    # ✅ DEEP DENSE NETWORK
+    x = Dense(256, activation='swish')(combined)
     x = BatchNormalization()(x)
-    x = Dropout(0.25)(x)
+    x = Dropout(0.4)(x)
+    
+    x = Dense(192, activation='swish')(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.4)(x)
+    
+    x = Dense(128, activation='swish')(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.3)(x)
 
-    feat_input = Input(shape=(8,), name='features_input')
-    dense_feat = Dense(48, activation='swish')(feat_input)
-    dense_feat = BatchNormalization()(dense_feat)
-    dense_feat = Dropout(0.2)(dense_feat)
+    # ✅ FEATURES PROCESSING
+    feat_input = Input(shape=(12,), name='features_input')  # 👈 Mude para 12 features!
+    feat_dense = Dense(64, activation='swish')(feat_input)
+    feat_dense = BatchNormalization()(feat_dense)
+    feat_dense = Dropout(0.3)(feat_dense)
+    
+    feat_dense = Dense(32, activation='swish')(feat_dense)
+    feat_dense = BatchNormalization()(feat_dense)
+    feat_dense = Dropout(0.2)(feat_dense)
 
-    combined = Concatenate()([x, dense_feat])
-    dense = Dense(160, activation='swish')(combined)
-    dense = BatchNormalization()(dense)
-    dense = Dropout(0.3)(dense)
-
-    out_num = Dense(num_total, activation='softmax', name='num_out')(dense)
-    out_color = Dense(3, activation='softmax', name='color_out')(dense)
-    out_dozen = Dense(4, activation='softmax', name='dozen_out')(dense)
-    out_neighbors = Dense(num_total, activation='softmax', name='neighbors_out')(dense)
-    out_regions = Dense(len(REGIONS), activation='softmax', name='regions_out')(dense)
-    out_even_odd_high_low = Dense(4, activation='softmax', name='eohl_out')(dense)
+    # ✅ FUSÃO FINAL
+    merged = Concatenate()([x, feat_dense])
+    
+    # Output layers (mantenha igual)
+    out_num = Dense(num_total, activation='softmax', name='num_out')(merged)
+    out_color = Dense(3, activation='softmax', name='color_out')(merged)
+    out_dozen = Dense(4, activation='softmax', name='dozen_out')(merged)
+    out_neighbors = Dense(num_total, activation='softmax', name='neighbors_out')(merged)
+    out_regions = Dense(len(REGIONS), activation='softmax', name='regions_out')(merged)
+    out_even_odd_high_low = Dense(4, activation='softmax', name='eohl_out')(merged)
 
     model = Model(inputs=[seq_input, feat_input],
                   outputs=[out_num, out_color, out_dozen, out_neighbors, out_regions, out_even_odd_high_low])
     
-    optimizer = Nadam(learning_rate=6e-4)
+    # ✅ OPTIMIZER MAIS EFICIENTE
+    optimizer = Nadam(learning_rate=7e-4, clipnorm=1.0, clipvalue=0.5)
     model.compile(optimizer=optimizer,
                   loss={'num_out': 'categorical_crossentropy',
                         'color_out': 'categorical_crossentropy',
@@ -549,9 +605,10 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
                         'neighbors_out': 'categorical_crossentropy',
                         'regions_out': 'categorical_crossentropy',
                         'eohl_out': 'categorical_crossentropy'},
-                  loss_weights={'num_out': 1.5, 'color_out': 0.25, 'dozen_out': 0.25, 'neighbors_out': 0.7, 'regions_out': 0.3, 'eohl_out': 0.2},
+                  loss_weights={'num_out': 2.0, 'color_out': 0.3, 'dozen_out': 0.3, 
+                               'neighbors_out': 1.2, 'regions_out': 0.6, 'eohl_out': 0.4},
                   metrics={'num_out': 'accuracy'})
-
+    
     return model
 # Função para calcular probabilidades dos vizinhos na roleta
 def calculate_neighbors_probs(history):
@@ -698,6 +755,24 @@ def predict_next_numbers(model, history, top_k=3):
     weighted = np.array(weighted)
     if weighted.sum() == 0:
         return []
+    # ✅ ESTRATÉGIA: FOCAR EM PADRÕES DE CURTO PRAZO (ADICIONE AQUI)
+recent_bias = 2.5  # Bias forte para números recentes
+window_size = 8    # Janela de curto prazo
+
+if len(history) >= window_size:
+    recent_numbers = history[-window_size:]
+    recent_count = Counter(recent_numbers)
+    
+    for num in range(NUM_TOTAL):
+        # Bonus para números muito recentes
+        if num in recent_numbers:
+            recency = recent_numbers.index(num) + 1
+            recency_bonus = 1.0 + (recent_bias * (1 - recency/window_size))
+            weighted[num] *= recency_bonus
+            
+        # Penalizar números saturados (evitar overfitting)
+        if recent_count.get(num, 0) >= window_size//2:
+            weighted[num] *= 0.6    
     weighted /= weighted.sum()
 
     top_indices = list(np.argsort(weighted)[-top_k:][::-1])
@@ -1164,11 +1239,20 @@ if st.button("Adicionar histórico"):
                     st.session_state.model,
                     top_k=3
                 )
-    # 5) Executa algumas iterações de treino em cima do replay carregado
-                with st.spinner("Executando treino inicial do DQN..."):
-                    for _ in range(60):   # ajuste fino: 20–100
-                        st.session_state.dqn_agent.replay(REPLAY_BATCH)
-                    st.session_state.dqn_agent.update_target()
+    # 5) TREINO DQN SUPER INTENSIVO
+with st.spinner("Treino DQN intensivo..."):
+    for i in range(80):  # ↑ 80 iterações
+        loss = st.session_state.dqn_agent.replay(REPLAY_BATCH)
+        if i % 20 == 0 and loss is not None:
+            logger.info(f"DQN Iter {i}: Loss={loss:.4f}, Eps={st.session_state.dqn_agent.epsilon:.3f}")
+    
+    # ✅ DOUBLE UPDATE para estabilidade
+    st.session_state.dqn_agent.update_target()
+    st.session_state.dqn_agent.update_target()
+    
+    # ✅ RESET inteligente do epsilon
+    st.session_state.dqn_agent.epsilon = max(EPSILON_MIN, 
+                                           st.session_state.dqn_agent.epsilon * 0.7)
                 st.success("DQN pré-treinado com o histórico.")
 # Opcional: Atualiza prev_state para próxima decisão já usar o modelo afinado
             st.session_state.prev_state = sequence_to_state(
@@ -1485,5 +1569,6 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
