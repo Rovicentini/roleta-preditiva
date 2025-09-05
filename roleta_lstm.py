@@ -99,9 +99,8 @@ if 'top_n_metrics' not in st.session_state:
         'Top-5': {'hits': 0, 'total': 0}
     }
 
-# MUDANÇA: Adicionado estado para armazenar estatísticas de normalização
+# ✅ CORREÇÃO CRÍTICA: Atualize para 12 features!
 if 'feat_stats' not in st.session_state:
-    # Exemplo de valores. SUBSTITUA POR ESTATÍSTICAS REAIS DO SEU HISTÓRICO.
     st.session_state.feat_stats = {
         'means': np.array([0.5, 0.25, 0.5, 0.2, 0.5, 0.5, 0.5, 0.1, 0.5, 0.5, 0.5, 0.5]),
         'stds': np.array([0.2, 0.1, 0.2, 0.1, 0.1, 0.1, 0.1, 0.05, 0.2, 0.2, 0.2, 0.2])
@@ -1572,6 +1571,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
