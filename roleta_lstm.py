@@ -202,9 +202,14 @@ def number_to_region(n):
     
 # MUDANÇA: A função agora pode normalizar usando estatísticas fornecidas
 def get_advanced_features(sequence, feat_means=None, feat_stds=None):
+    # Inicializa todas as 12 features com zeros
+    features = np.zeros(12)
+    
     if sequence is None or len(sequence) < 2:
         # Se os dados estiverem faltando, retorna features normalizadas para zero
-        return np.zeros(8)
+        if feat_means is not None and feat_stds is not None:
+            features = (features - feat_means) / (feat_stds + 1e-6)
+        return features
     
     seq = np.array(sequence)
     
@@ -242,15 +247,13 @@ def get_advanced_features(sequence, feat_means=None, feat_stds=None):
     unique_ratio = len(freq) / len(sequence) if len(sequence) > 0 else 0.0
     is_repeat = 1.0 if last == second_last else 0.0
 
-    features = np.array([
+    # Preenche as primeiras 8 features
+    features[:8] = np.array([
         mean, std, wheel_speed, deceleration,
         last_freq_norm, freq_range_norm, unique_ratio, is_repeat
     ])
 
-    # MUDANÇA: Normalização usando as estatísticas fornecidas
-    if feat_means is not None and feat_stds is not None:
-        features = (features - feat_means) / (feat_stds + 1e-6) # Adiciona epsilon para evitar divisão por zero
-     # ✅ NOVAS FEATURES DE ALTA IMPACTÂNCIA
+    # ✅ NOVAS FEATURES DE ALTA IMPACTÂNCIA (últimas 4 features)
     if len(sequence) >= 5:
         # 1. Tendência de direção da roda (clockwise vs counter-clockwise)
         last_5 = sequence[-5:]
@@ -284,17 +287,13 @@ def get_advanced_features(sequence, feat_means=None, feat_stds=None):
         else:
             avg_distance = 0.5
             
-        features = np.concatenate([
-            features,
-            np.array([clockwise_ratio, color_volatility, hot_momentum, avg_distance])
-        ])    
-        if feat_means is not None and feat_stds is not None:
-        # Garante que as dimensões batem
-            if len(features) != len(feat_means):
-            # Se não bater, usa normalização padrão
-                features = (features - np.mean(features)) / (np.std(features) + 1e-6)
-            else:
-                features = (features - feat_means) / (feat_stds + 1e-6)       
+        # Preenche as últimas 4 features
+        features[8:12] = np.array([clockwise_ratio, color_volatility, hot_momentum, avg_distance])
+    
+    # Normalização usando as estatísticas fornecidas
+    if feat_means is not None and feat_stds is not None:
+        features = (features - feat_means) / (feat_stds + 1e-6)
+    
     return features
 
 # Nova função para atualizar a matriz de co-ocorrência
@@ -1577,6 +1576,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
