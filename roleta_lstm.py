@@ -759,18 +759,33 @@ if st.session_state.last_input is not None:
 
 # ... (no final, adicionar nova seção de gerenciamento de banca) ...
 
-st.sidebar.markdown("### 💰 Gerenciamento de Banca")
-st.sidebar.write(f"Bankroll atual: ${st.session_state.bankroll:.2f}")
+# --- UI ---
+st.set_page_config(layout="wide")
+st.title("🔥 ROULETTE AI - LSTM multi-saída + DQN (ULTRA REVISADO)")
 
-if st.session_state.lstm_predictions and 'num_probs' in st.session_state.lstm_predictions:
-    confidence = np.max(st.session_state.lstm_predictions['num_probs'])
-    recommended_bet = money_management_system(
-        st.session_state.bankroll, 
-        st.session_state.recent_bets, 
-        confidence
-    )
-    st.sidebar.write(f"Aposta recomendada: ${recommended_bet:.2f}")
-    st.sidebar.write(f"Confiança: {confidence:.2%}")
+# Sidebar com analytics
+live_performance_monitoring()
+
+# 🔽 ADICIONE ESTA LINHA PARA FECHAR QUALQUER BLOCO ABERTO
+if True:  # Esta linha fecha qualquer bloco aberto anterior
+    st.sidebar.markdown("### 💰 Gerenciamento de Banca")
+    st.sidebar.write(f"Bankroll atual: ${st.session_state.bankroll:.2f}")
+
+    if st.session_state.lstm_predictions and 'num_probs' in st.session_state.lstm_predictions:
+        confidence = np.max(st.session_state.lstm_predictions['num_probs'])
+        recommended_bet = money_management_system(
+            st.session_state.bankroll, 
+            st.session_state.recent_bets, 
+            confidence
+        )
+        st.sidebar.write(f"Aposta recomendada: ${recommended_bet:.2f}")
+        st.sidebar.write(f"Confiança: {confidence:.2%}")
+
+# --- AUX FUNCTIONS ---
+def number_to_color(n):
+    if n == 0:
+        return 0  # zero
+    return 1 if n in RED_NUMBERS else 2  # 1=red,2=black
 
 # ... (manter o restante do código) ...
 
@@ -2174,6 +2189,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
