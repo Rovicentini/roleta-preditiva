@@ -113,9 +113,9 @@ SEQUENCE_LEN = 20
 BET_AMOUNT = 1.0
 
 # Replay/treino DQN
-TARGET_UPDATE_FREQ = 50
-REPLAY_BATCH = 256
-REPLAY_SIZE = 5000
+TARGET_UPDATE_FREQ = 35
+REPLAY_BATCH = 300
+REPLAY_SIZE = 8000
 DQN_TRAIN_EVERY = 5
 DQN_LEARNING_RATE = 1e-3
 DQN_GAMMA = 0.40
@@ -904,48 +904,49 @@ def compute_reward(action_numbers, outcome_number, lstm_sugestoes=None,
 
     action_numbers = set([a for a in action_numbers if 0 <= a <= 36])
 
-    # Acertos exatos
+    # 1. ✅ PRIMEIRO VERIFICA ACERTOS
     acertos_exatos = [a for a in action_numbers if a == outcome_number]
-
-    # Acertos vizinhos
     acertos_vizinhos = []
     for a in action_numbers:
         vizinhos = optimal_neighbors(a, max_neighbors=max_neighbors_for_reward)
         if outcome_number in vizinhos:
             acertos_vizinhos.append(a)
 
-    # Penalidade por quantidade de apostas
-    bet_penalty = 0.1 * len(action_numbers)
-
-    # Recompensa proporcional
+    # 2. ✅ BASE REWARD: Só recompensa se houve acerto
     reward = 0.0
-    reward += len(acertos_exatos) * REWARD_EXACT
-    reward += len(acertos_vizinhos) * REWARD_NEIGHBOR
+    if acertos_exatos or acertos_vizinhos:
+        # ✅ Recompensa por acertos
+        reward += len(acertos_exatos) * REWARD_EXACT
+        reward += len(acertos_vizinhos) * REWARD_NEIGHBOR
+        
+        # ✅ Bônus por múltiplos acertos (apenas se acertou)
+        if len(acertos_exatos) + len(acertos_vizinhos) >= 3:
+            reward += 2.0
+
+        # ✅ Bônus por streak (apenas se acertou)
+        if 'stats' in st.session_state and st.session_state.stats.get('streak', 0) >= 3:
+            reward += 1.0
+            
+        # ✅ Bônus se DQN acertar sem ajuda do LSTM (apenas se acertou)
+        bonus_superacao = 0.0
+        if lstm_sugestoes:
+            lstm_set = set(lstm_sugestoes)
+            dqn_set = set(action_numbers)
+            if outcome_number in dqn_set and outcome_number not in lstm_set:
+                bonus_superacao = 2.0
+        reward += bonus_superacao
+        
+    else:
+        # ❌ PENALIDADE por NÃO acertar (usando REWARD_LOSS)
+        reward += REWARD_LOSS  # ← Penalidade por perder
+
+    # 3. ✅ Penalidades (aplicam independente de acerto)
+    bet_penalty = 0.1 * len(action_numbers)
+    reward -= bet_penalty
 
     # Penalidade por apostas amplas
     if len(action_numbers) > 10:
         reward -= 1.0
-
-    # Bônus por múltiplos acertos
-    if len(acertos_exatos) + len(acertos_vizinhos) >= 3:
-        reward += 2.0
-
-    # Bônus por streak
-    if 'stats' in st.session_state and st.session_state.stats.get('streak', 0) >= 3:
-        reward += 1.0
-
-    # Penalidade proporcional ao número de apostas
-    reward -= bet_penalty
-                       
-    # Bônus se DQN acertar sem ajuda do LSTM
-    bonus_superacao = 0.0
-    if lstm_sugestoes:
-        lstm_set = set(lstm_sugestoes)
-        dqn_set = set(action_numbers)
-        if outcome_number in dqn_set and outcome_number not in lstm_set:
-            bonus_superacao = 2.0  # DQN acertou sozinho
-
-    reward += bonus_superacao
 
     return reward * bet_amount, acertos_exatos, acertos_vizinhos
 
@@ -1165,7 +1166,7 @@ if st.button("Adicionar histórico"):
                 )
     # 5) Executa algumas iterações de treino em cima do replay carregado
                 with st.spinner("Executando treino inicial do DQN..."):
-                    for _ in range(40):   # ajuste fino: 20–100
+                    for _ in range(60):   # ajuste fino: 20–100
                         st.session_state.dqn_agent.replay(REPLAY_BATCH)
                     st.session_state.dqn_agent.update_target()
                 st.success("DQN pré-treinado com o histórico.")
@@ -1484,4 +1485,5 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
