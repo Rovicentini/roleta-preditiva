@@ -576,7 +576,7 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     x = Dropout(0.3)(x)
 
     # ✅ FEATURES PROCESSING
-    feat_input = Input(shape=(12,), name='features_input')  # 👈 Mude para 12 features!
+    feat_input = Input(shape=(12,), name='features_input')
     feat_dense = Dense(64, activation='swish')(feat_input)
     feat_dense = BatchNormalization()(feat_dense)
     feat_dense = Dropout(0.3)(feat_dense)
@@ -588,7 +588,7 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     # ✅ FUSÃO FINAL
     merged = Concatenate()([x, feat_dense])
     
-    # Output layers (mantenha igual)
+    # Output layers
     out_num = Dense(num_total, activation='softmax', name='num_out')(merged)
     out_color = Dense(3, activation='softmax', name='color_out')(merged)
     out_dozen = Dense(4, activation='softmax', name='dozen_out')(merged)
@@ -599,8 +599,9 @@ def build_deep_learning_model(seq_len=SEQUENCE_LEN, num_total=NUM_TOTAL):
     model = Model(inputs=[seq_input, feat_input],
                   outputs=[out_num, out_color, out_dozen, out_neighbors, out_regions, out_even_odd_high_low])
     
-    # ✅ OPTIMIZER MAIS EFICIENTE
-    optimizer = Nadam(learning_rate=7e-4, clipnorm=1.0, clipvalue=0.5)
+    # ✅ OPTIMIZER MAIS EFICIENTE (corrigido)
+    optimizer = Nadam(learning_rate=7e-4)
+    
     model.compile(optimizer=optimizer,
                   loss={'num_out': 'categorical_crossentropy',
                         'color_out': 'categorical_crossentropy',
@@ -1575,6 +1576,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
