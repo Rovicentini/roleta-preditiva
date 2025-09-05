@@ -752,33 +752,37 @@ def predict_next_numbers(model, history, top_k=3):
 
         weighted.append(adjusted[num] * freq_factor * distance_factor * momentum_factor * neighbor_factor * region_factor * eohl_factor)
 
-    weighted = np.array(weighted)
+        weighted = np.array(weighted)
     if weighted.sum() == 0:
         return []
-    # ✅ ESTRATÉGIA: FOCAR EM PADRÕES DE CURTO PRAZO (ADICIONE AQUI)
-recent_bias = 2.5  # Bias forte para números recentes
-window_size = 8    # Janela de curto prazo
-
-if len(history) >= window_size:
-    recent_numbers = history[-window_size:]
-    recent_count = Counter(recent_numbers)
     
-    for num in range(NUM_TOTAL):
-        # Bonus para números muito recentes
-        if num in recent_numbers:
-            recency = recent_numbers.index(num) + 1
-            recency_bonus = 1.0 + (recent_bias * (1 - recency/window_size))
-            weighted[num] *= recency_bonus
-            
-        # Penalizar números saturados (evitar overfitting)
-        if recent_count.get(num, 0) >= window_size//2:
-            weighted[num] *= 0.6    
-weighted /= weighted.sum()
-top_indices = list(np.argsort(weighted)[-top_k:][::-1])
-color_pred = int(np.argmax(color_probs))
-dozen_pred = int(np.argmax(dozen_probs))
+    # ✅ ESTRATÉGIA: FOCAR EM PADRÕES DE CURTO PRAZO
+    recent_bias = 2.5  # Bias forte para números recentes
+    window_size = 8    # Janela de curto prazo
 
-return {
+    if len(history) >= window_size:
+        recent_numbers = history[-window_size:]
+        recent_count = Counter(recent_numbers)
+        
+        for num in range(NUM_TOTAL):
+            # Bonus para números muito recentes
+            if num in recent_numbers:
+                recency = recent_numbers.index(num) + 1
+                recency_bonus = 1.0 + (recent_bias * (1 - recency/window_size))
+                weighted[num] *= recency_bonus
+                
+            # Penalizar números saturados (evitar overfitting)
+            if recent_count.get(num, 0) >= window_size//2:
+                weighted[num] *= 0.6
+    
+    # ✅ Normalizar novamente após ajustes
+    weighted /= weighted.sum()
+
+    top_indices = list(np.argsort(weighted)[-top_k:][::-1])
+    color_pred = int(np.argmax(color_probs))
+    dozen_pred = int(np.argmax(dozen_probs))
+
+    return {
         'top_numbers': [(int(i), float(weighted[i])) for i in top_indices],
         'num_probs': num_probs,
         'color_probs': color_probs,
@@ -1568,6 +1572,7 @@ for metrica, dados in st.session_state.top_n_metrics.items():
         st.metric(label=metrica, value=f"{acuracia:.2f}%", help=f"Baseado em {dados['total']} previsões.")
     else:
         st.metric(label=metrica, value="N/A")
+
 
 
 
